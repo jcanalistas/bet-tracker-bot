@@ -5,8 +5,8 @@ export type BetType = "simple" | "combinada";
 
 export interface TicketInfo {
   sport: string;
-  competition: string;
-  selections: string;
+  /** Enfrentamiento/jugadores y la selección apostada en una sola línea, ej. "Real Madrid vs Barcelona — Gana Real Madrid". Si es combinada, cada partido+selección va unido por " + ". */
+  match: string;
   betType: BetType;
   /** Cuota total del ticket, tal como aparece en la imagen (ej. "1,91"). Vacío si no se pudo leer. */
   odds: string;
@@ -20,8 +20,7 @@ const ANALYZE_PROMPT = `Analiza esta imagen de un ticket de apuesta deportiva de
 
 Devuelve tu respuesta EXACTAMENTE en este formato, una línea por campo, sin nada más:
 DEPORTE: <deporte del ticket, ej. "Fútbol", "Tenis", "Baloncesto", "Balonmano">
-COMPETICION: <competición o torneo exacto según lo que veas en el ticket, ej. "LaLiga", "ATP Madrid", "NBA">
-SELECCIONES: <resumen breve de la selección o selecciones, combinando equipo/jugador y mercado de cada una, unidas por " + " si hay varias>
+PARTIDO: <equipos o jugadores del partido y la selección apostada, ej. "Real Madrid vs Barcelona — Gana Real Madrid" o "Alcaraz vs Sinner — Alcaraz gana el primer set". Si es una combinada, une cada partido+selección con " + ">
 TIPO: <"simple" si el ticket tiene una única selección, "combinada" si tiene dos o más>
 CUOTA: <cuota total del ticket tal como aparece en la imagen, con coma decimal, ej. 1,91>
 IMPORTE: <importe apostado (stake) tal como aparece en la imagen, solo el número con coma decimal y sin símbolo de moneda, ej. 10. Si no aparece con claridad en el ticket, escribe exactamente SIN_DATO>`;
@@ -30,7 +29,7 @@ const ANALYZE_TIMEOUT_MS = 90_000;
 const ANALYZE_RETRIES = 2;
 const ANALYZE_RETRY_BASE_DELAY_MS = 3_000;
 
-/** Usa la visión de Gemini para leer el ticket y extraer deporte, competición, selecciones, tipo, cuota e importe. */
+/** Usa la visión de Gemini para leer el ticket y extraer deporte, partido, tipo, cuota e importe. */
 export async function analyzeTicket(ticketBuffer: Buffer, apiKey: string): Promise<TicketInfo> {
   const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: ANALYZE_TIMEOUT_MS } });
 
@@ -75,23 +74,21 @@ function parseTicketInfo(text: string): TicketInfo {
   const cleaned = text.replace(/[*_`#]/g, "");
 
   const sportMatch = /DEPORTE:\s*(.+)/i.exec(cleaned);
-  const competitionMatch = /COMPETICION:\s*(.+)/i.exec(cleaned);
-  const selectionsMatch = /SELECCIONES:\s*(.+)/i.exec(cleaned);
+  const matchMatch = /PARTIDO:\s*(.+)/i.exec(cleaned);
   const typeMatch = /TIPO:\s*(simple|combinada)/i.exec(cleaned);
   const oddsMatch = /CUOTA:\s*(.+)/i.exec(cleaned);
   const stakeMatch = /IMPORTE:\s*(.+)/i.exec(cleaned);
 
   const sport = sportMatch?.[1]?.trim() ?? "";
-  const competition = competitionMatch?.[1]?.trim() ?? "";
-  const selections = selectionsMatch?.[1]?.trim() ?? "";
+  const match = matchMatch?.[1]?.trim() ?? "";
   const betType: BetType = /combinada/i.test(typeMatch?.[1] ?? "") ? "combinada" : "simple";
   const odds = oddsMatch?.[1]?.trim() ?? "";
   const rawStake = stakeMatch?.[1]?.trim() ?? "";
   const stake = /SIN_DATO/i.test(rawStake) ? "" : rawStake;
 
-  if (!sport || !selections) {
+  if (!sport || !match) {
     throw new Error(`No se pudo extraer la información del ticket. Respuesta recibida: ${text.slice(0, 300)}`);
   }
 
-  return { sport, competition, selections, betType, odds, stake };
+  return { sport, match, betType, odds, stake };
 }

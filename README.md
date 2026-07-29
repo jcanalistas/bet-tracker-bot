@@ -5,9 +5,11 @@ Metrika): cero fricción de instalar nada, vive donde ya está el apostador.
 
 1. Mandas la foto del ticket de tu apuesta.
 2. El bot la lee (visión de Gemini) y la registra automáticamente:
-   deporte, competición, selección(es), tipo (simple/combinada), cuota e
-   importe.
-3. Más tarde la marcas como ✅ Ganada o ❌ Perdida con un botón.
+   deporte, partido (equipos/jugadores + selección), tipo (simple/combinada),
+   cuota e importe.
+3. Más tarde la marcas como ✅ Ganada o ❌ Perdida con un botón — el
+   beneficio se calcula solo, con la cuota que ya se leyó del ticket (no
+   hace falta volver a escribirla).
 4. `/stats` — aciertos, beneficio, con filtros por deporte y por
    simple/combinada.
 
@@ -146,17 +148,18 @@ En Telegram, háblale al bot:
 
 - `/start` (o "🏠 Empezar") — mensaje de bienvenida.
 - Manda la **foto del ticket** — el bot la lee y registra la apuesta
-  automáticamente (deporte, competición, selección(es), simple/combinada,
-  cuota e importe). Si no consigue leer el importe apostado en la imagen,
-  te lo pregunta antes de registrarla.
+  automáticamente (deporte, partido, simple/combinada, cuota e importe). Si
+  no consigue leer el importe apostado en la imagen, te lo pregunta antes de
+  registrarla.
 - `/pendientes` (o "📝 Pendientes") — lista las apuestas sin resolver, cada
-  una con botones **"✅ Ganada"** / **"❌ Perdida"**. "❌ Perdida" se
-  resuelve al momento (pierdes el importe apostado). "✅ Ganada" te pide
-  que le mandes la cuota REAL que conseguiste en la casa de apuestas (no la
-  leída del ticket, que puede no coincidir del todo) y calcula el beneficio
-  como importe × (cuota − 1).
+  una con botones **"✅ Ganada"** / **"❌ Perdida"**. Ambas se resuelven al
+  momento sin preguntar nada más: "❌ Perdida" resta el importe apostado,
+  "✅ Ganada" calcula el beneficio como importe × (cuota − 1) usando la
+  cuota que ya se leyó del ticket al registrar (solo si esa cuota no se
+  pudo leer, te la pide en ese momento como excepción).
 - `/stats` (o "📊 Stats") — total de apuestas registradas, pendientes,
-  ganadas/perdidas, % de acierto y beneficio neto acumulado.
+  ganadas/perdidas, % de acierto y beneficio neto acumulado. No se anuncia
+  en /start para no abrumar, pero admite filtros:
   - `/stats simple` o `/stats combinada` — filtra solo por ese tipo.
   - `/stats <deporte>` (ej. `/stats tenis`) — filtra por deporte
     (coincidencia parcial de texto).
@@ -168,8 +171,8 @@ En Telegram, háblale al bot:
 - El bot es público: cualquiera que conozca su usuario de Telegram puede
   hablarle y empezar a registrar sus propias apuestas (aisladas del resto).
   No hay registro/login más allá del ID de Telegram.
-- Si Gemini no lee bien el deporte o la competición del ticket, se registra
-  tal cual (no hay validación contra una lista cerrada de deportes/ligas).
+- Si Gemini no lee bien el deporte o el partido del ticket, se registra tal
+  cual (no hay validación contra una lista cerrada de deportes/ligas).
 - El agente de visión (`gemini-flash-latest`) puede cambiar de
   comportamiento o disponibilidad, al ser un modelo "latest" de Google.
 
@@ -194,9 +197,9 @@ src/
   gemini/
     retry.ts                  Reintentos con backoff ante errores transitorios de la API de Gemini
   tickets/
-    analyzeTicket.ts           Lectura del ticket por visión de Gemini (deporte, competición, selecciones, tipo, cuota, importe)
+    analyzeTicket.ts           Lectura del ticket por visión de Gemini (deporte, partido, tipo, cuota, importe)
   state/
-    pendingInput.ts             Estado en Firestore a la espera de una respuesta del usuario (importe, cuota real)
+    pendingInput.ts             Estado en Firestore a la espera de una respuesta del usuario (importe, o cuota si no se pudo leer del ticket)
   stats/
     firestore.ts                Cliente de Firestore (vía ADC)
     betsStore.ts                 Modelo de apuesta + CRUD (pendiente/ganada/perdida) y estadísticas

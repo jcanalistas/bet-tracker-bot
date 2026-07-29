@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { analyzeTicket, type TicketInfo } from "./tickets/analyzeTicket";
 import {
   createPendingBet,
+  getBet,
   getPendingBets,
   markBetLost,
   markBetWon,
@@ -25,10 +26,9 @@ const mainKeyboard = Markup.keyboard([[START_BUTTON_TEXT, PENDIENTES_BUTTON_TEXT
 
 async function sendWelcome(ctx: Context) {
   await ctx.reply(
-    "👋 Mándame la foto de tu ticket de apuesta y lo registro automáticamente: deporte, competición, " +
-      "selección, cuota e importe.\n\n" +
-      "Cuando se resuelva, márcala como ✅ Ganada o ❌ Perdida desde /pendientes.\n" +
-      "Consulta tus estadísticas con /stats (o /stats simple, /stats combinada, /stats <deporte>).",
+    "👋 Mándame la foto de tu ticket de apuesta y lo registro automáticamente: deporte, partido, cuota e importe.\n\n" +
+      "Cuando se resuelva, márcala como ✅ Ganada o ❌ Perdida desde /pendientes.\n\n" +
+      "Consulta tus estadísticas con /stats",
     mainKeyboard
   );
 }
@@ -61,8 +61,7 @@ function pendingBetKeyboard(betId: string) {
 
 interface BetDescription {
   sport: string;
-  competition: string;
-  selections: string;
+  match: string;
   betType: TicketInfo["betType"];
   /** Cuota ya formateada para mostrar (con coma decimal), o null si no se conoce. */
   oddsLabel: string | null;
@@ -70,8 +69,8 @@ interface BetDescription {
 
 function describeBet(bet: BetDescription, stake: number): string {
   const lines = [
-    `${bet.sport} — ${bet.competition || "competición sin identificar"}`,
-    `🎯 ${bet.selections}`,
+    bet.sport,
+    `🎯 ${bet.match}`,
     bet.betType === "combinada" ? "🔀 Combinada" : "🔹 Simple",
     bet.oddsLabel ? `💰 Cuota: ${bet.oddsLabel}` : null,
     `💶 Importe: ${formatMoney(stake)}€`,
@@ -83,8 +82,7 @@ async function registerBet(ctx: Context, userId: string, ticket: TicketInfo, sta
   const input: BetInput = {
     userId,
     sport: ticket.sport,
-    competition: ticket.competition,
-    selections: ticket.selections,
+    match: ticket.match,
     betType: ticket.betType,
     estimatedOdds: ticket.odds ? parseDecimalInput(ticket.odds) : null,
     stake,
@@ -159,44 +157,33 @@ bot.action(/^betlost:(.+)$/, async (ctx) => {
   }
 });
 
+// Al marcar "✅ Ganada" usamos directamente la cuota leída del ticket al
+// registrar la apuesta (ya es la cuota real a la que jugó el usuario, no
+// hace falta volver a preguntarla). Solo si Gemini no pudo leerla del
+// ticket le pedimos que la escriba, como último recurso.
 bot.action(/^betwon:(.+)$/, async (ctx) => {
   const betId = ctx.match[1];
-  await setPendingOdds(String(ctx.from!.id), betId);
-  await ctx.answerCbQuery();
-  await ctx.editMessageReplyMarkup(undefined);
-  await ctx.reply("✅ Marcada como ganada. Mándame la cuota REAL que conseguiste en la casa de apuestas, p.ej. 1,91.");
-});
-
-bot.on("text", async (ctx) => {
-  const userId = String(ctx.from.id);
-
-  const betIdAwaitingOdds = await consumePendingOdds(userId);
-  if (betIdAwaitingOdds !== null) {
-    const oddsValue = parseDecimalInput(ctx.message.text);
-    if (oddsValue === null || oddsValue <= 1) {
-      await setPendingOdds(userId, betIdAwaitingOdds);
-      await ctx.reply("⚠️ No entendí esa cuota. Mándame un número mayor que 1, p.ej. 1,91.");
-      return;
-    }
-    try {
-      const profit = await markBetWon(betIdAwaitingOdds, oddsValue);
-      await ctx.reply(`✅ Apuesta ganada @${ctx.message.text.trim()}. Beneficio: +${formatMoney(profit)}€.`);
-    } catch (err) {
-      console.error("No se pudo marcar la apuesta como ganada:", err);
-      await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
-    }
+  const bet = await getBet(betId);
+  if (!bet) {
+    await ctx.answerCbQuery("⚠️ No se encontró esa apuesta.", { show_alert: true });
     return;
   }
 
-  const pendingTicket = await consumePendingStake(userId);
-  if (pendingTicket !== null) {
-    const stake = parseDecimalInput(ctx.message.text);
-    if (stake === null) {
-      await setPendingStake(userId, pendingTicket);
-      await ctx.reply("⚠️ No entendí ese importe. Mándame solo el número, p.ej. 10.");
-      return;
-    }
-    await registerBet(ctx, userId, pendingTicket, stake);
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup(undefined);
+
+  if (bet.estimatedOdds === null) {
+    await setPendingOdds(String(ctx.from!.id), betId);
+    await ctx.reply("✅ Marcada como ganada. No pude leer la cuota en el ticket — mándame la cuota, p.ej. 1,91.");
+    return;
+  }
+
+  try {
+    const profit = await markBetWon(betId, bet.estimatedOdds);
+    await ctx.reply(`✅ Apuesta ganada @${formatMoney(bet.estimatedOdds)}. Beneficio: +${formatMoney(profit)}€.`);
+  } catch (err) {
+    console.error("No se pudo marcar la apuesta como ganada:", err);
+    await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
   }
 });
 
@@ -230,3 +217,43 @@ bot.command("stats", (ctx) => {
   return showStats(ctx, filter);
 });
 bot.hears(STATS_BUTTON_TEXT, (ctx) => showStats(ctx));
+
+// Manejador genérico de texto: registrado el ÚLTIMO a propósito. Los
+// comandos y botones de arriba (bot.command/bot.hears) ya consumen su
+// propio texto; si este handler se registra antes que ellos, se come
+// CUALQUIER mensaje de texto (incluidos los botones del teclado y los
+// comandos) antes de que lleguen a su manejador correspondiente. Aquí solo
+// deben llegar los mensajes que responden a una pregunta pendiente
+// (importe no leído del ticket, o cuota si no se pudo leer del ticket).
+bot.on("text", async (ctx) => {
+  const userId = String(ctx.from.id);
+
+  const betIdAwaitingOdds = await consumePendingOdds(userId);
+  if (betIdAwaitingOdds !== null) {
+    const oddsValue = parseDecimalInput(ctx.message.text);
+    if (oddsValue === null || oddsValue <= 1) {
+      await setPendingOdds(userId, betIdAwaitingOdds);
+      await ctx.reply("⚠️ No entendí esa cuota. Mándame un número mayor que 1, p.ej. 1,91.");
+      return;
+    }
+    try {
+      const profit = await markBetWon(betIdAwaitingOdds, oddsValue);
+      await ctx.reply(`✅ Apuesta ganada @${ctx.message.text.trim()}. Beneficio: +${formatMoney(profit)}€.`);
+    } catch (err) {
+      console.error("No se pudo marcar la apuesta como ganada:", err);
+      await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
+    }
+    return;
+  }
+
+  const pendingTicket = await consumePendingStake(userId);
+  if (pendingTicket !== null) {
+    const stake = parseDecimalInput(ctx.message.text);
+    if (stake === null) {
+      await setPendingStake(userId, pendingTicket);
+      await ctx.reply("⚠️ No entendí ese importe. Mándame solo el número, p.ej. 10.");
+      return;
+    }
+    await registerBet(ctx, userId, pendingTicket, stake);
+  }
+});

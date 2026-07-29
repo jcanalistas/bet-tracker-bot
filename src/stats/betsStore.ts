@@ -8,8 +8,7 @@ export interface BetInput {
   /** ID de usuario de Telegram, como string. Aísla los datos de cada usuario. */
   userId: string;
   sport: string;
-  competition: string;
-  selections: string;
+  match: string;
   betType: BetType;
   /** Cuota leída del ticket al registrar, informativa (la que cuenta para el beneficio es la real, tecleada al marcar Ganada). */
   estimatedOdds: number | null;
