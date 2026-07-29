@@ -28,4 +28,16 @@ export const env = {
   // simplemente no se ejecuta (el registro del ticket sigue funcionando
   // igual).
   oddsApiKey: process.env.ODDS_API_KEY,
+  // Cobro automático de Premium (Stripe). Las tres opcionales a propósito:
+  // sin ellas, el botón "⭐ Premium" simplemente no ofrece pagar solo y cae
+  // al mensaje de activación manual de siempre.
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+  // Firma para verificar que los webhooks vienen de verdad de Stripe (ver
+  // server.ts). Sin ella, el endpoint /webhooks/stripe rechaza todo.
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  // ID del precio recurrente mensual creado en el Dashboard de Stripe.
+  stripePriceId: process.env.STRIPE_PRICE_ID,
+  // Username del bot (sin @), para volver al chat tras pagar en Stripe
+  // Checkout. Opcional: sin él, se usa PUBLIC_URL como destino de vuelta.
+  telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME,
 };

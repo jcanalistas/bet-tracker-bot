@@ -33,6 +33,7 @@ import { renderProfitChart } from "./charts/profitChart";
 import { betsToCsv } from "./export/csvExport";
 import { findBetterOdds } from "./odds/matchOdds";
 import { generateBettingAnalysis } from "./analysis/aiAnalysis";
+import { createSubscriptionCheckout } from "./payments/stripeClient";
 
 // Por defecto Telegraf corta el procesamiento de cada update a los 90s
 // (handlerTimeout); leer un ticket con la visión de Gemini puede tardar más
@@ -108,11 +109,28 @@ async function showPremiumInfo(ctx: Context) {
     await ctx.reply("⭐ Ya tienes Premium activo. Disfruta de los filtros avanzados en /stats.");
     return;
   }
-  await ctx.reply(
-    "⭐ *Premium* desbloquea en /stats: stats completas por deporte y tipo, análisis con IA, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
-      "Todavía no hay pago automático — escríbeme por Telegram para activarlo.",
-    { parse_mode: "Markdown" }
-  );
+
+  const intro =
+    "⭐ *Premium* desbloquea en /stats: stats completas por deporte y tipo, análisis con IA, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n";
+
+  let checkoutUrl: string | null = null;
+  try {
+    checkoutUrl = await createSubscriptionCheckout(userId);
+  } catch (err) {
+    console.error("No se pudo crear la sesión de pago de Stripe:", err);
+  }
+
+  if (checkoutUrl) {
+    await ctx.reply(`${intro}2,90€/mes, cancela cuando quieras.`, {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([[Markup.button.url("💳 Suscribirme — 2,90€/mes", checkoutUrl)]]),
+    });
+    return;
+  }
+
+  await ctx.reply(`${intro}Todavía no hay pago automático — escríbeme por Telegram para activarlo.`, {
+    parse_mode: "Markdown",
+  });
 }
 
 bot.command("premium", showPremiumInfo);

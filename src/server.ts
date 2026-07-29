@@ -1,6 +1,7 @@
 import express from "express";
 import { bot } from "./bot";
 import { env } from "./config/env";
+import { handleStripeWebhook } from "./payments/stripeWebhook";
 
 // Red de seguridad: sin esto, un rechazo de promesa no capturado en
 // cualquier dependencia (p.ej. un timeout interno del SDK de Gemini) tumba
@@ -14,6 +15,12 @@ process.on("uncaughtException", (err) => {
 });
 
 const app = express();
+
+// Va ANTES del express.json() global: Stripe necesita el cuerpo tal cual
+// (Buffer sin parsear) para verificar la firma del webhook — si el body ya
+// ha pasado por express.json(), la verificación falla siempre.
+app.post("/webhooks/stripe", express.raw({ type: "application/json" }), handleStripeWebhook);
+
 app.use(express.json());
 
 const webhookPath = `/telegram/${env.webhookSecretPath}`;

@@ -150,6 +150,73 @@ proyecto) — no hay colisión de nombres de colección (`bets`,
 separados). Aun así, se recomienda usar un proyecto de GCP distinto al de
 JC Analistas para no mezclar facturación ni cuotas entre los dos negocios.
 
+## 6. Configurar Stripe (cobro automático de Premium)
+
+Opcional — sin esto, "⭐ Premium" sigue funcionando con activación manual
+(`/premium_on`). Necesita el servicio ya desplegado (paso 5), porque el
+webhook de Stripe necesita conocer la URL pública.
+
+### 6.1 Crear la cuenta y el precio
+
+1. Crea una cuenta en [stripe.com](https://stripe.com) (email + verificación).
+   No hace falta activar cobros de verdad todavía — con el modo **Test**
+   (interruptor arriba a la derecha del Dashboard) ya puedes sacar claves y
+   probar todo el flujo con tarjetas de prueba.
+2. En el Dashboard: **Product catalog** → **Add product**. Nombre "Premium",
+   precio **2,90€**, recurrencia **Monthly**. Guarda y copia el **Price ID**
+   (empieza por `price_...`) — es tu `STRIPE_PRICE_ID`.
+3. **Developers** → **API keys** → copia la **Secret key** (`sk_test_...`
+   en modo Test) — es tu `STRIPE_SECRET_KEY`.
+
+### 6.2 Subir los secretos y desplegar con ellos
+
+```bash
+echo -n "TU_SECRET_KEY_DE_STRIPE" | gcloud secrets create stripe-secret-key --data-file=-
+
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+gcloud secrets add-iam-policy-binding stripe-secret-key \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud run deploy bet-tracker-bot \
+  --source . \
+  --region europe-southwest1 \
+  --allow-unauthenticated \
+  --update-env-vars STRIPE_PRICE_ID=TU_PRICE_ID,TELEGRAM_BOT_USERNAME=tu_bot_sin_arroba \
+  --update-secrets STRIPE_SECRET_KEY=stripe-secret-key:latest \
+  --timeout=300
+```
+
+### 6.3 Crear el endpoint del webhook (después de desplegar)
+
+1. En el Dashboard de Stripe: **Developers** → **Webhooks** → **Add endpoint**.
+2. URL: `https://TU-URL-DE-CLOUD-RUN.a.run.app/webhooks/stripe`.
+3. Eventos a escuchar: `checkout.session.completed`,
+   `customer.subscription.deleted`, `invoice.payment_failed`.
+4. Al guardar, copia el **Signing secret** (`whsec_...`) — es tu
+   `STRIPE_WEBHOOK_SECRET`.
+
+```bash
+echo -n "TU_WHSEC" | gcloud secrets create stripe-webhook-secret --data-file=-
+
+gcloud secrets add-iam-policy-binding stripe-webhook-secret \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud run services update bet-tracker-bot \
+  --region europe-southwest1 \
+  --update-secrets STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
+```
+
+### 6.4 Probar
+
+Pulsa "⭐ Premium" en el bot sin tener premium activo: debe salir el botón
+"💳 Suscribirme". En modo Test, paga con la tarjeta de prueba
+`4242 4242 4242 4242`, cualquier fecha futura y CVC — el premium se activa
+solo en segundos. Cuando quieras cobrar de verdad, cambia el interruptor
+Test/Live en Stripe, repite 6.1-6.3 con las claves `sk_live_...`/`whsec_...`
+del modo Live, y vuelve a desplegar con esas.
+
 ## Uso
 
 En Telegram, háblale al bot:
@@ -197,20 +264,28 @@ En Telegram, háblale al bot:
   enlace de referido y su bono de bienvenida, configuradas en
   `src/config/bonuses.ts` (edita ese array para añadir/quitar casas). Si
   está vacío, responde que todavía no hay bonos configurados.
-- `/premium` — cualquier usuario puede consultar si tiene premium activo,
-  o ver qué desbloquea si no lo tiene.
+- `/premium` (o "⭐ Premium") — si ya tienes premium, lo confirma. Si no,
+  y Stripe está configurado, manda un botón "💳 Suscribirme — 2,90€/mes"
+  con el link de pago (Stripe Checkout); si Stripe no está configurado,
+  cae al mensaje de activación manual.
 
 ### Premium
 
-Sin pasarela de pago todavía: se activa/desactiva a mano. Solo tú (el
-`OWNER_TELEGRAM_ID` que configures) puedes usar:
+**Cobro automático (Stripe)**: suscripción mensual de 2,90€, vía Stripe
+Checkout — ver "6. Configurar Stripe" más abajo. Al pagar, el webhook
+`/webhooks/stripe` activa el premium automáticamente; si el usuario cancela
+o falla el cobro, se le desactiva solo.
+
+**Activación manual**: sigue disponible como respaldo (o mientras no
+configures Stripe). Solo tú (el `OWNER_TELEGRAM_ID` que configures) puedes
+usar:
 
 - `/premium_on <ID de Telegram>` — activa premium a ese usuario.
 - `/premium_off <ID de Telegram>` — se lo desactiva.
 
 Cualquier otro usuario que intente esos comandos no obtiene respuesta (ni
-confirmación de que existen). El estado se guarda en la colección
-`users` de Firestore.
+confirmación de que existen). El estado (incluida la vinculación con el
+cliente de Stripe) se guarda en la colección `users` de Firestore.
 
 ### Comparador de cuotas
 
@@ -262,8 +337,8 @@ en el dashboard de The Odds API los primeros días.
 3. Revisar el modelo de datos multi-usuario según necesidades reales de uso
    (por ahora: aislamiento simple por ID de Telegram en la colección
    `bets`).
-4. Montar una pasarela de pago real para premium (hoy se activa a mano con
-   `/premium_on`) y fijar el precio.
+4. Pasar Stripe de modo Test a Live cuando quieras cobrar de verdad (ver
+   "6. Configurar Stripe").
 
 ## Estructura del proyecto
 
@@ -294,6 +369,9 @@ src/
     matchOdds.ts                    Orquesta todo lo anterior: busca mejor cuota para una apuesta
   analysis/
     aiAnalysis.ts                   Análisis IA (Gemini) del desglose de stats, premium
+  payments/
+    stripeClient.ts                 Cliente de Stripe + creación de la sesión de Checkout
+    stripeWebhook.ts                 Maneja checkout.session.completed / cancelación / impago
   stats/
     firestore.ts                Cliente de Firestore (vía ADC)
     betsStore.ts                 Modelo de apuesta + CRUD (pendiente/ganada/perdida) y estadísticas
