@@ -157,9 +157,12 @@ En Telegram, háblale al bot:
   "✅ Ganada" calcula el beneficio como importe × (cuota − 1) usando la
   cuota que ya se leyó del ticket al registrar (solo si esa cuota no se
   pudo leer, te la pide en ese momento como excepción).
-- `/stats` (o "📊 Stats") — total de apuestas registradas, pendientes,
-  ganadas/perdidas, % de acierto y beneficio neto acumulado. No se anuncia
-  en /start para no abrumar, pero admite filtros:
+- `/stats` (o "📊 Stats") — pregunta primero el periodo con botones (**Mes
+  actual**, **Año actual**, **Histórico**, según la fecha en que se
+  registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
+  resueltas (✅/❌), % de acierto y beneficio. No se anuncian en /start para
+  no abrumar, pero también admite filtros de texto (van directos a
+  histórico, sin preguntar el periodo):
   - `/stats simple` o `/stats combinada` — filtra solo por ese tipo.
   - `/stats <deporte>` (ej. `/stats tenis`) — filtra por deporte
     (coincidencia parcial de texto).
