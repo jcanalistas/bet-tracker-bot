@@ -1,0 +1,29 @@
+{
+  "name": "bet-tracker-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot de Telegram que registra apuestas deportivas desde la foto del ticket y lleva las estadísticas",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "@google/genai": "^2.13.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
