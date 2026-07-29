@@ -26,6 +26,34 @@ import { betsToCsv } from "./export/csvExport";
 // tiene su propio timeout interno).
 export const bot = new Telegraf(env.telegramBotToken, { handlerTimeout: Infinity });
 
+// Sin esto, un error dentro de cualquier handler (p.ej. un callback query
+// caducado) se pierde en silencio: Telegraf lo traga y el usuario se queda
+// sin respuesta, sin ninguna pista en los logs de por qué.
+bot.catch((err, ctx) => {
+  console.error(`Error procesando update ${ctx.updateType}:`, err);
+});
+
+// answerCbQuery/editMessageReplyMarkup pueden fallar (callback query
+// caducado, mensaje ya editado, etc.) — con try/catch normal esos fallos
+// abortarían el resto del handler y el usuario se quedaría sin respuesta
+// aunque la parte importante (Firestore, etc.) fuera a funcionar bien. Se
+// registran y se ignoran para que el resto del handler siga adelante.
+async function safeAnswerCbQuery(ctx: Context, text?: string, extra?: { show_alert?: boolean }) {
+  try {
+    await ctx.answerCbQuery(text, extra);
+  } catch (err) {
+    console.error("No se pudo responder al callback query (puede haber caducado):", err);
+  }
+}
+
+async function safeClearKeyboard(ctx: Context) {
+  try {
+    await ctx.editMessageReplyMarkup(undefined);
+  } catch (err) {
+    console.error("No se pudo actualizar el teclado del mensaje:", err);
+  }
+}
+
 const START_BUTTON_TEXT = "🏠 Empezar";
 const PENDIENTES_BUTTON_TEXT = "📝 Pendientes";
 const STATS_BUTTON_TEXT = "📊 Stats";
@@ -241,12 +269,12 @@ bot.action(/^betlost:(.+)$/, async (ctx) => {
   const betId = ctx.match[1];
   try {
     const profit = await markBetLost(betId);
-    await ctx.answerCbQuery("Marcada como perdida ❌");
-    await ctx.editMessageReplyMarkup(undefined);
+    await safeAnswerCbQuery(ctx, "Marcada como perdida ❌");
+    await safeClearKeyboard(ctx);
     await ctx.reply(`❌ Apuesta marcada como perdida (${formatMoney(profit)}€).`);
   } catch (err) {
     console.error("No se pudo marcar la apuesta como perdida:", err);
-    await ctx.answerCbQuery("⚠️ No se pudo actualizar. Revisa los logs.", { show_alert: true });
+    await safeAnswerCbQuery(ctx, "⚠️ No se pudo actualizar. Revisa los logs.", { show_alert: true });
   }
 });
 
@@ -256,14 +284,21 @@ bot.action(/^betlost:(.+)$/, async (ctx) => {
 // ticket le pedimos que la escriba, como último recurso.
 bot.action(/^betwon:(.+)$/, async (ctx) => {
   const betId = ctx.match[1];
-  const bet = await getBet(betId);
+  let bet;
+  try {
+    bet = await getBet(betId);
+  } catch (err) {
+    console.error("No se pudo leer la apuesta:", err);
+    await safeAnswerCbQuery(ctx, "⚠️ No se pudo leer la apuesta. Revisa los logs.", { show_alert: true });
+    return;
+  }
   if (!bet) {
-    await ctx.answerCbQuery("⚠️ No se encontró esa apuesta.", { show_alert: true });
+    await safeAnswerCbQuery(ctx, "⚠️ No se encontró esa apuesta.", { show_alert: true });
     return;
   }
 
-  await ctx.answerCbQuery();
-  await ctx.editMessageReplyMarkup(undefined);
+  await safeAnswerCbQuery(ctx);
+  await safeClearKeyboard(ctx);
 
   if (bet.estimatedOdds === null) {
     await setPendingOdds(String(ctx.from!.id), betId);
@@ -356,15 +391,15 @@ bot.hears(STATS_BUTTON_TEXT, askStatsPeriod);
 
 bot.action(/^stats:(mes|anio|historico)$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
-  await ctx.answerCbQuery();
-  await ctx.editMessageReplyMarkup(undefined);
+  await safeAnswerCbQuery(ctx);
+  await safeClearKeyboard(ctx);
   await showStats(ctx, period);
 });
 
 bot.action(/^statsf:(mes|anio|historico):(simple|combinada)$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
   const filter = ctx.match[2];
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
   if (!(await isPremium(String(ctx.from!.id)))) {
     await replyPremiumLocked(ctx);
     return;
@@ -373,7 +408,7 @@ bot.action(/^statsf:(mes|anio|historico):(simple|combinada)$/, async (ctx) => {
 });
 
 bot.action(/^statsf:(mes|anio|historico):deporte$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
   if (!(await isPremium(String(ctx.from!.id)))) {
     await replyPremiumLocked(ctx);
     return;
@@ -384,7 +419,7 @@ bot.action(/^statsf:(mes|anio|historico):deporte$/, async (ctx) => {
 bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
   const userId = String(ctx.from!.id);
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
   if (!(await isPremium(userId))) {
     await replyPremiumLocked(ctx);
     return;
@@ -411,7 +446,7 @@ bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {
 bot.action(/^statsf:(mes|anio|historico):csv$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
   const userId = String(ctx.from!.id);
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
   if (!(await isPremium(userId))) {
     await replyPremiumLocked(ctx);
     return;
