@@ -107,7 +107,7 @@ bot.command("premium", async (ctx) => {
     return;
   }
   await ctx.reply(
-    "⭐ *Premium* desbloquea en /stats: análisis detallado por deporte y tipo, análisis con IA, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
+    "⭐ *Premium* desbloquea en /stats: stats completas por deporte y tipo, análisis con IA, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
       "Todavía no hay pago automático — escríbeme por Telegram para activarlo.",
     { parse_mode: "Markdown" }
   );
@@ -433,7 +433,7 @@ async function askStatsPeriod(ctx: Context) {
 // Filtros y extras avanzados: solo premium.
 function statsFilterKeyboard(period: StatsPeriod) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback("⭐ Análisis detallado", `statsf:${period}:detallado`)],
+    [Markup.button.callback("⭐ Stats completas", `statsf:${period}:detallado`)],
     [Markup.button.callback("⭐ Análisis IA", `statsf:${period}:ia`)],
     [
       Markup.button.callback("⭐ Gráfica", `statsf:${period}:grafica`),
@@ -497,6 +497,12 @@ function formatSummaryLine(label: string, summary: StatsSummary): string {
   return `*${label}*: ${summary.total} · 🎯 ${hitRateLabel} · ${profitIcon} ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`;
 }
 
+function sportEmoji(sport: string): string {
+  if (/f[uú]tbol|football|soccer/i.test(sport)) return "⚽ ";
+  if (/tenis|tennis/i.test(sport)) return "🎾 ";
+  return "";
+}
+
 bot.action(/^statsf:(mes|anio|historico):detallado$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
   const userId = String(ctx.from!.id);
@@ -510,20 +516,20 @@ bot.action(/^statsf:(mes|anio|historico):detallado$/, async (ctx) => {
   try {
     detailed = await getDetailedStats(userId, period);
   } catch (err) {
-    console.error("No se pudo obtener el análisis detallado:", err);
-    await ctx.reply("⚠️ No se pudo obtener el análisis detallado. Revisa los logs.");
+    console.error("No se pudieron obtener las stats completas:", err);
+    await ctx.reply("⚠️ No se pudieron obtener las stats completas. Revisa los logs.");
     return;
   }
 
-  const lines = [`🔎 *Análisis detallado* — ${PERIOD_LABELS[period]}`, "", "*Por tipo*"];
-  lines.push(formatSummaryLine("Simple", detailed.simple));
-  lines.push(formatSummaryLine("Combinada", detailed.combinada));
-  lines.push("", "*Por deporte*");
+  const lines = [`🔎 *Stats completas* — ${PERIOD_LABELS[period]}`, "", "*Tipo*"];
+  lines.push(formatSummaryLine("🔹 Simple", detailed.simple));
+  lines.push(formatSummaryLine("🔀 Combinada", detailed.combinada));
+  lines.push("", "*Deporte*");
   if (detailed.bySport.length === 0) {
     lines.push("_Sin apuestas en este periodo._");
   } else {
     for (const { sport, summary } of detailed.bySport) {
-      lines.push(formatSummaryLine(sport, summary));
+      lines.push(formatSummaryLine(`${sportEmoji(sport)}${sport}`, summary));
     }
   }
 

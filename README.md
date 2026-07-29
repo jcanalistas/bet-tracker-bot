@@ -178,11 +178,12 @@ En Telegram, háblale al bot:
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
   resueltas (✅/❌), % de acierto y beneficio. Debajo del resumen hay botones
   ⭐ con filtros y extras — todos exclusivos de **Premium** (ver abajo):
-  - ⭐ Análisis detallado — desglose por tipo (simple/combinada) y por
-    deporte en un solo mensaje: apuestas, % de acierto y beneficio de cada
-    uno, sin tener que ir eligiendo filtro por filtro (`/stats simple`,
-    `/stats combinada` y `/stats <deporte>` por texto siguen funcionando
-    igual, también premium, si prefieres uno suelto).
+  - ⭐ Stats completas — desglose por tipo (🔹 simple/🔀 combinada) y por
+    deporte (con su emoji, ej. ⚽ Fútbol, 🎾 Tenis) en un solo mensaje:
+    apuestas, % de acierto y beneficio de cada uno, sin tener que ir
+    eligiendo filtro por filtro (`/stats simple`, `/stats combinada` y
+    `/stats <deporte>` por texto siguen funcionando igual, también
+    premium, si prefieres uno suelto).
   - ⭐ Análisis IA — le pasa ese mismo desglose a Gemini y pide un análisis
     escueto (máximo 5 líneas): dónde ganas, dónde pierdes y qué hacer para
     mejorar.
