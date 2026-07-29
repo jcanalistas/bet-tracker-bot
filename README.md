@@ -162,11 +162,17 @@ En Telegram, háblale al bot:
   si alguna casa afiliada tiene mejor cuota para esa apuesta — ver
   "Comparador de cuotas" más abajo para el alcance exacto.
 - `/pendientes` (o "📝 Pendientes") — lista las apuestas sin resolver, cada
-  una con botones **"✅ Ganada"** / **"❌ Perdida"**. Ambas se resuelven al
-  momento sin preguntar nada más: "❌ Perdida" resta el importe apostado,
-  "✅ Ganada" calcula el beneficio como importe × (cuota − 1) usando la
-  cuota que ya se leyó del ticket al registrar (solo si esa cuota no se
-  pudo leer, te la pide en ese momento como excepción).
+  una con 5 botones (los mismos que salen justo al registrar la apuesta):
+  - **"✅ Ganada"** — calcula el beneficio como importe × (cuota − 1) usando
+    la cuota que ya se leyó del ticket al registrar (solo si esa cuota no
+    se pudo leer, te la pide en ese momento como excepción).
+  - **"❌ Perdida"** — resta el importe apostado, al momento.
+  - **"🔁 Nula"** — la casa anuló el mercado o el partido se suspendió:
+    beneficio 0€, como si no hubiera pasado (se te devuelve el importe).
+  - **"💵 Cashout"** — te pide el beneficio o pérdida exacto que sacaste
+    (puede ser negativo, ej. `-3`) y lo registra tal cual.
+  - **"🗑️ Anular"** — borra la apuesta por completo, para cuando se
+    registró por error; no deja ningún rastro en las estadísticas.
 - `/stats` (o "📊 Stats") — pregunta primero el periodo con botones (**Mes
   actual**, **Año actual**, **Histórico**, según la fecha en que se
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,

@@ -2,7 +2,7 @@ import type { DocumentSnapshot } from "@google-cloud/firestore";
 import { firestore } from "./firestore";
 import type { BetType } from "../tickets/analyzeTicket";
 
-export type BetStatus = "pendiente" | "ganada" | "perdida";
+export type BetStatus = "pendiente" | "ganada" | "perdida" | "nula" | "cashout";
 
 export interface BetInput {
   /** ID de usuario de Telegram, como string. Aísla los datos de cada usuario. */
@@ -73,6 +73,27 @@ export async function markBetWon(id: string, realOdds: number): Promise<number> 
   return profit;
 }
 
+/** Apuesta nula/anulada por la casa (partido suspendido, etc.): se devuelve el importe, beneficio 0. */
+export async function markBetVoid(id: string): Promise<void> {
+  await firestore
+    .collection(COLLECTION)
+    .doc(id)
+    .update({ status: "nula" satisfies BetStatus, resolvedAt: Date.now(), profit: 0 });
+}
+
+/** Cashout: el beneficio (o pérdida) lo escribe el usuario a mano, puede ser negativo. */
+export async function markBetCashout(id: string, profit: number): Promise<void> {
+  await firestore
+    .collection(COLLECTION)
+    .doc(id)
+    .update({ status: "cashout" satisfies BetStatus, resolvedAt: Date.now(), profit: cleanFloat(profit) });
+}
+
+/** Borra la apuesta por completo (registrada por error) — no queda ni rastro en las estadísticas. */
+export async function deleteBet(id: string): Promise<void> {
+  await firestore.collection(COLLECTION).doc(id).delete();
+}
+
 export type StatsPeriod = "mes" | "anio" | "historico";
 
 export interface StatsSummary {
@@ -131,8 +152,11 @@ async function getUserBets(userId: string, options: StatsOptions): Promise<Bet[]
 
 function summarize(bets: Bet[]): StatsSummary {
   const pending = bets.filter((b) => b.status === "pendiente").length;
-  const won = bets.filter((b) => b.status === "ganada").length;
-  const lost = bets.filter((b) => b.status === "perdida").length;
+  // El cashout no tiene un "ganada"/"perdida" explícito: se clasifica por
+  // el signo del beneficio que escribió el usuario. Las nulas no cuentan
+  // ni como acierto ni como fallo (sí entran en "total").
+  const won = bets.filter((b) => b.status === "ganada" || (b.status === "cashout" && (b.profit ?? 0) > 0)).length;
+  const lost = bets.filter((b) => b.status === "perdida" || (b.status === "cashout" && (b.profit ?? 0) <= 0)).length;
   const resolved = won + lost;
   const netProfit = cleanFloat(bets.reduce((sum, b) => sum + (b.profit ?? 0), 0));
   const hitRate = resolved > 0 ? cleanFloat((won / resolved) * 100) : 0;

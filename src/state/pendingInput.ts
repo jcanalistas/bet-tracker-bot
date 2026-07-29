@@ -11,6 +11,7 @@ import type { TicketInfo } from "../tickets/analyzeTicket";
 
 const STAKE_COLLECTION = "pendingStakeInput";
 const ODDS_COLLECTION = "pendingOddsInput";
+const CASHOUT_COLLECTION = "pendingCashoutInput";
 
 /** Ticket ya leído a la espera de que el usuario escriba el importe apostado (el ticket no lo mostraba con claridad). */
 export async function setPendingStake(userId: string, ticket: TicketInfo): Promise<void> {
@@ -34,6 +35,20 @@ export async function setPendingOdds(userId: string, betId: string): Promise<voi
 /** Lee y borra en el mismo paso. Null si no había ninguna pendiente. */
 export async function consumePendingOdds(userId: string): Promise<string | null> {
   const ref = firestore.collection(ODDS_COLLECTION).doc(userId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) return null;
+  await ref.delete();
+  return (snapshot.data() as { betId: string }).betId;
+}
+
+/** Apuesta marcada "💵 Cashout" a la espera de que el usuario escriba el beneficio (puede ser negativo). */
+export async function setPendingCashout(userId: string, betId: string): Promise<void> {
+  await firestore.collection(CASHOUT_COLLECTION).doc(userId).set({ betId, createdAt: Date.now() });
+}
+
+/** Lee y borra en el mismo paso. Null si no había ninguno pendiente. */
+export async function consumePendingCashout(userId: string): Promise<string | null> {
+  const ref = firestore.collection(CASHOUT_COLLECTION).doc(userId);
   const snapshot = await ref.get();
   if (!snapshot.exists) return null;
   await ref.delete();

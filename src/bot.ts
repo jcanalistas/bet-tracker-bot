@@ -4,12 +4,15 @@ import { BONUS_OFFERS } from "./config/bonuses";
 import { analyzeTicket, type TicketInfo } from "./tickets/analyzeTicket";
 import {
   createPendingBet,
+  deleteBet,
   getBet,
   getBetsForExport,
   getDetailedStats,
   getPendingBets,
   getProfitSeries,
+  markBetCashout,
   markBetLost,
+  markBetVoid,
   markBetWon,
   getStatsSummary,
   formatMoney,
@@ -17,7 +20,14 @@ import {
   type StatsPeriod,
   type StatsSummary,
 } from "./stats/betsStore";
-import { setPendingStake, consumePendingStake, setPendingOdds, consumePendingOdds } from "./state/pendingInput";
+import {
+  setPendingStake,
+  consumePendingStake,
+  setPendingOdds,
+  consumePendingOdds,
+  setPendingCashout,
+  consumePendingCashout,
+} from "./state/pendingInput";
 import { isPremium, setPremium } from "./premium/premiumStore";
 import { renderProfitChart } from "./charts/profitChart";
 import { betsToCsv } from "./export/csvExport";
@@ -169,6 +179,12 @@ function parseDecimalInput(text: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
+/** Como parseDecimalInput pero admite negativos (0 o pérdida) — para el beneficio del cashout. */
+function parseSignedDecimalInput(text: string): number | null {
+  const value = Number(text.replace(",", ".").trim());
+  return Number.isFinite(value) ? value : null;
+}
+
 async function downloadTelegramPhoto(ctx: Context): Promise<Buffer> {
   const message = ctx.message as { photo?: Array<{ file_id: string }> } | undefined;
   const photos = message?.photo;
@@ -184,6 +200,8 @@ async function downloadTelegramPhoto(ctx: Context): Promise<Buffer> {
 function pendingBetKeyboard(betId: string) {
   return Markup.inlineKeyboard([
     [Markup.button.callback("✅ Ganada", `betwon:${betId}`), Markup.button.callback("❌ Perdida", `betlost:${betId}`)],
+    [Markup.button.callback("🔁 Nula", `betvoid:${betId}`), Markup.button.callback("💵 Cashout", `betcashout:${betId}`)],
+    [Markup.button.callback("🗑️ Anular", `betdelete:${betId}`)],
   ]);
 }
 
@@ -358,6 +376,40 @@ bot.action(/^betwon:(.+)$/, async (ctx) => {
     console.error("No se pudo marcar la apuesta como ganada:", err);
     await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
   }
+});
+
+bot.action(/^betvoid:(.+)$/, async (ctx) => {
+  const betId = ctx.match[1];
+  try {
+    await markBetVoid(betId);
+    await safeAnswerCbQuery(ctx, "Marcada como nula 🔁");
+    await safeClearKeyboard(ctx);
+    await ctx.reply("🔁 Apuesta marcada como nula: se te devuelve el importe, beneficio 0€.");
+  } catch (err) {
+    console.error("No se pudo marcar la apuesta como nula:", err);
+    await safeAnswerCbQuery(ctx, "⚠️ No se pudo actualizar. Revisa los logs.", { show_alert: true });
+  }
+});
+
+bot.action(/^betdelete:(.+)$/, async (ctx) => {
+  const betId = ctx.match[1];
+  try {
+    await deleteBet(betId);
+    await safeAnswerCbQuery(ctx, "Apuesta anulada 🗑️");
+    await safeClearKeyboard(ctx);
+    await ctx.reply("🗑️ Apuesta eliminada del registro — no cuenta en tus estadísticas.");
+  } catch (err) {
+    console.error("No se pudo anular la apuesta:", err);
+    await safeAnswerCbQuery(ctx, "⚠️ No se pudo anular. Revisa los logs.", { show_alert: true });
+  }
+});
+
+bot.action(/^betcashout:(.+)$/, async (ctx) => {
+  const betId = ctx.match[1];
+  await safeAnswerCbQuery(ctx);
+  await safeClearKeyboard(ctx);
+  await setPendingCashout(String(ctx.from!.id), betId);
+  await ctx.reply("💵 Cashout. Mándame el beneficio (o pérdida) exacto, ej. 5 o -3.");
 });
 
 const PERIOD_LABELS: Record<StatsPeriod, string> = {
@@ -589,6 +641,24 @@ bot.on("text", async (ctx) => {
       await ctx.reply(`✅ Apuesta ganada @${ctx.message.text.trim()}. Beneficio: +${formatMoney(profit)}€.`);
     } catch (err) {
       console.error("No se pudo marcar la apuesta como ganada:", err);
+      await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
+    }
+    return;
+  }
+
+  const betIdAwaitingCashout = await consumePendingCashout(userId);
+  if (betIdAwaitingCashout !== null) {
+    const profit = parseSignedDecimalInput(ctx.message.text);
+    if (profit === null) {
+      await setPendingCashout(userId, betIdAwaitingCashout);
+      await ctx.reply("⚠️ No entendí esa cifra. Mándame el beneficio (o pérdida) como número, ej. 5 o -3.");
+      return;
+    }
+    try {
+      await markBetCashout(betIdAwaitingCashout, profit);
+      await ctx.reply(`💵 Cashout registrado. Beneficio: ${profit >= 0 ? "+" : ""}${formatMoney(profit)}€.`);
+    } catch (err) {
+      console.error("No se pudo registrar el cashout:", err);
       await ctx.reply("⚠️ No se pudo actualizar la apuesta. Revisa los logs.");
     }
     return;
