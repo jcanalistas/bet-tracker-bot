@@ -72,9 +72,11 @@ const START_BUTTON_TEXT = "📸 Registrar";
 const PENDIENTES_BUTTON_TEXT = "📝 Pendientes";
 const STATS_BUTTON_TEXT = "📊 Stats";
 const BONOS_BUTTON_TEXT = "🎁 Bonos Bienvenida";
+const PREMIUM_BUTTON_TEXT = "⭐ Premium";
 const mainKeyboard = Markup.keyboard([
   [START_BUTTON_TEXT, PENDIENTES_BUTTON_TEXT],
   [STATS_BUTTON_TEXT, BONOS_BUTTON_TEXT],
+  [PREMIUM_BUTTON_TEXT],
 ]).resize();
 
 async function sendWelcome(ctx: Context) {
@@ -100,7 +102,7 @@ async function replyPremiumLocked(ctx: Context) {
   );
 }
 
-bot.command("premium", async (ctx) => {
+async function showPremiumInfo(ctx: Context) {
   const userId = String(ctx.from!.id);
   if (await isPremium(userId)) {
     await ctx.reply("⭐ Ya tienes Premium activo. Disfruta de los filtros avanzados en /stats.");
@@ -111,7 +113,10 @@ bot.command("premium", async (ctx) => {
       "Todavía no hay pago automático — escríbeme por Telegram para activarlo.",
     { parse_mode: "Markdown" }
   );
-});
+}
+
+bot.command("premium", showPremiumInfo);
+bot.hears(PREMIUM_BUTTON_TEXT, showPremiumInfo);
 
 // Activación manual mientras no hay pasarela de pago: solo el dueño del
 // bot (OWNER_TELEGRAM_ID) puede usar estos dos comandos. Para cualquier
