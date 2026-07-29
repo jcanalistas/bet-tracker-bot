@@ -10,7 +10,7 @@ export interface BetInput {
   sport: string;
   match: string;
   betType: BetType;
-  /** Cuota leída del ticket al registrar, informativa (la que cuenta para el beneficio es la real, tecleada al marcar Ganada). */
+  /** Cuota leída del ticket al registrar; es la que cuenta para el beneficio al marcar Ganada. */
   estimatedOdds: number | null;
   stake: number;
 }
@@ -73,6 +73,8 @@ export async function markBetWon(id: string, realOdds: number): Promise<number> 
   return profit;
 }
 
+export type StatsPeriod = "mes" | "anio" | "historico";
+
 export interface StatsSummary {
   total: number;
   pending: number;
@@ -82,13 +84,41 @@ export interface StatsSummary {
   netProfit: number;
 }
 
-/** `filter`: "simple" / "combinada" filtran por tipo; cualquier otro texto filtra por deporte (coincidencia parcial, sin distinguir mayúsculas). */
-export async function getStatsSummary(userId: string, filter?: string): Promise<StatsSummary> {
+/** Rango [from, to) en ms desde epoch para el periodo pedido, o null si es histórico (sin filtrar). */
+function periodRange(period: StatsPeriod): { from: number; to: number } | null {
+  if (period === "historico") return null;
+
+  const now = new Date();
+  if (period === "mes") {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
+      to: new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime(),
+    };
+  }
+
+  return {
+    from: new Date(now.getFullYear(), 0, 1).getTime(),
+    to: new Date(now.getFullYear() + 1, 0, 1).getTime(),
+  };
+}
+
+export interface StatsOptions {
+  /** "simple" / "combinada" filtran por tipo; cualquier otro texto filtra por deporte (coincidencia parcial, sin distinguir mayúsculas). */
+  filter?: string;
+  period?: StatsPeriod;
+}
+
+export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {
   const snapshot = await firestore.collection(COLLECTION).where("userId", "==", userId).get();
   let bets = snapshot.docs.map(toBet);
 
-  if (filter) {
-    const normalized = filter.trim().toLowerCase();
+  const range = periodRange(options.period ?? "historico");
+  if (range) {
+    bets = bets.filter((b) => b.createdAt >= range.from && b.createdAt < range.to);
+  }
+
+  if (options.filter) {
+    const normalized = options.filter.trim().toLowerCase();
     if (normalized === "simple" || normalized === "combinada") {
       bets = bets.filter((b) => b.betType === normalized);
     } else {

@@ -11,6 +11,7 @@ import {
   getStatsSummary,
   formatMoney,
   type BetInput,
+  type StatsPeriod,
 } from "./stats/betsStore";
 import { setPendingStake, consumePendingStake, setPendingOdds, consumePendingOdds } from "./state/pendingInput";
 
@@ -41,6 +42,18 @@ async function sendWelcome(ctx: Context) {
 bot.start(sendWelcome);
 bot.hears(START_BUTTON_TEXT, sendWelcome);
 
+// MarkdownV2 (a diferencia del modo "Markdown" clásico usado en el resto
+// del bot) sí soporta anidar negrita + enlace en una misma entidad, que es
+// lo que hace falta para que el nombre de la casa sea un hipervínculo en
+// negrita. A cambio, hay que escapar los caracteres especiales a mano.
+function escapeMarkdownV2(text: string): string {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
+}
+
+function escapeMarkdownV2Url(url: string): string {
+  return url.replace(/[)\\]/g, "\\$&");
+}
+
 async function showBonuses(ctx: Context) {
   if (BONUS_OFFERS.length === 0) {
     await ctx.reply("🎁 Todavía no hay bonos configurados. ¡Vuelve pronto!");
@@ -49,12 +62,14 @@ async function showBonuses(ctx: Context) {
 
   const lines = ["🎁 *Bonos de bienvenida*", ""];
   for (const offer of BONUS_OFFERS) {
-    lines.push(`*${offer.name}*${offer.bonus ? ` — ${offer.bonus}` : ""}`);
-    lines.push(offer.url);
+    const name = escapeMarkdownV2(offer.name);
+    const url = escapeMarkdownV2Url(offer.url);
+    const bonus = offer.bonus ? escapeMarkdownV2(offer.bonus) : null;
+    lines.push(`*[${name}](${url})*${bonus ? ` — ${bonus}` : ""}`);
     lines.push("");
   }
 
-  await ctx.reply(lines.join("\n").trim(), { parse_mode: "Markdown" });
+  await ctx.reply(lines.join("\n").trim(), { parse_mode: "MarkdownV2" });
 }
 
 bot.command("bonos", showBonuses);
@@ -211,11 +226,29 @@ bot.action(/^betwon:(.+)$/, async (ctx) => {
   }
 });
 
-async function showStats(ctx: Context, filter?: string) {
+const PERIOD_LABELS: Record<StatsPeriod, string> = {
+  mes: "Mes actual",
+  anio: "Año actual",
+  historico: "Histórico",
+};
+
+function periodKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback("📅 Mes actual", "stats:mes")],
+    [Markup.button.callback("🗓️ Año actual", "stats:anio")],
+    [Markup.button.callback("📚 Histórico", "stats:historico")],
+  ]);
+}
+
+async function askStatsPeriod(ctx: Context) {
+  await ctx.reply("📊 ¿Qué periodo quieres consultar?", periodKeyboard());
+}
+
+async function showStats(ctx: Context, period: StatsPeriod, filter?: string) {
   const userId = String(ctx.from!.id);
   let summary;
   try {
-    summary = await getStatsSummary(userId, filter);
+    summary = await getStatsSummary(userId, { filter, period });
   } catch (err) {
     console.error("No se pudieron obtener las estadísticas:", err);
     await ctx.reply("⚠️ No se pudieron obtener las estadísticas. Revisa los logs.");
@@ -223,14 +256,16 @@ async function showStats(ctx: Context, filter?: string) {
   }
 
   const resolved = summary.won + summary.lost;
+  const profitIcon = summary.netProfit > 0 ? "📈" : summary.netProfit < 0 ? "📉" : "➖";
+  const header = `📊 *Estadísticas* — ${PERIOD_LABELS[period]}${filter ? ` (filtro: ${filter})` : ""}`;
   const lines = [
-    filter ? `📊 *Estadísticas* (filtro: ${filter})` : "📊 *Estadísticas*",
+    header,
     "",
-    `Apuestas registradas: ${summary.total}`,
-    `Pendientes: ${summary.pending}`,
-    `Resueltas: ${resolved} (${summary.won} ganadas, ${summary.lost} perdidas)`,
-    resolved > 0 ? `Acierto: ${formatMoney(summary.hitRate)}%` : "Acierto: —",
-    `Beneficio neto: ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`,
+    `📝 Registradas: ${summary.total}`,
+    `⏳ Pendientes: ${summary.pending}`,
+    `📌 Resueltas: ${resolved} (✅ ${summary.won} · ❌ ${summary.lost})`,
+    resolved > 0 ? `🎯 Acierto: ${formatMoney(summary.hitRate)}%` : "🎯 Acierto: —",
+    `${profitIcon} Beneficio: ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`,
   ];
 
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
@@ -238,9 +273,17 @@ async function showStats(ctx: Context, filter?: string) {
 
 bot.command("stats", (ctx) => {
   const filter = ctx.message.text.split(/\s+/).slice(1).join(" ").trim() || undefined;
-  return showStats(ctx, filter);
+  if (filter) return showStats(ctx, "historico", filter);
+  return askStatsPeriod(ctx);
 });
-bot.hears(STATS_BUTTON_TEXT, (ctx) => showStats(ctx));
+bot.hears(STATS_BUTTON_TEXT, askStatsPeriod);
+
+bot.action(/^stats:(mes|anio|historico)$/, async (ctx) => {
+  const period = ctx.match[1] as StatsPeriod;
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup(undefined);
+  await showStats(ctx, period);
+});
 
 // Manejador genérico de texto: registrado el ÚLTIMO a propósito. Los
 // comandos y botones de arriba (bot.command/bot.hears) ya consumen su
