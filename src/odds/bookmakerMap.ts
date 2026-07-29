@@ -3,9 +3,15 @@
 // en ninguna región, así que se quedan fuera del comparador aunque sigan
 // apareciendo en 🎁 Bonos Bienvenida). La clave de este objeto debe
 // coincidir exactamente con el "name" de bonuses.ts.
+//
+// Betfair: OJO — "betfair_ex_eu"/"betfair_ex_uk" son el Exchange (mercado
+// entre apostadores, con comisión, cuotas normalmente más altas que el
+// producto normal). Usar solo "betfair_sb_uk" (Sportsbook, cuota fija), que
+// es el producto real al que lleva el link de afiliado — mezclar Exchange
+// aquí daba cuotas que no coincidían con lo que el usuario veía en la app.
 export const COVERED_BOOKMAKER_KEYS: Record<string, string[]> = {
   Winamax: ["winamax_de", "winamax_fr"],
-  Betfair: ["betfair_ex_eu", "betfair_ex_uk", "betfair_sb_uk"],
+  Betfair: ["betfair_sb_uk"],
   "William Hill": ["williamhill"],
   Betway: ["betway"],
   "888 Sport": ["sport888"],
