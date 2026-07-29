@@ -58,7 +58,7 @@ async function safeClearKeyboard(ctx: Context) {
   }
 }
 
-const START_BUTTON_TEXT = "🏠 Empezar";
+const START_BUTTON_TEXT = "📸 Registrar";
 const PENDIENTES_BUTTON_TEXT = "📝 Pendientes";
 const STATS_BUTTON_TEXT = "📊 Stats";
 const BONOS_BUTTON_TEXT = "🎁 Bonos Bienvenida";

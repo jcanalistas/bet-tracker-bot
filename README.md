@@ -154,7 +154,7 @@ JC Analistas para no mezclar facturación ni cuotas entre los dos negocios.
 
 En Telegram, háblale al bot:
 
-- `/start` (o "🏠 Empezar") — mensaje de bienvenida.
+- `/start` (o "📸 Registrar") — mensaje de bienvenida.
 - Manda la **foto del ticket** — el bot la lee y registra la apuesta
   automáticamente (deporte, partido, simple/combinada, cuota e importe). Si
   no consigue leer el importe apostado en la imagen, te lo pregunta antes de
