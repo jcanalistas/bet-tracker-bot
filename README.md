@@ -163,6 +163,10 @@ En Telegram, háblale al bot:
   - `/stats simple` o `/stats combinada` — filtra solo por ese tipo.
   - `/stats <deporte>` (ej. `/stats tenis`) — filtra por deporte
     (coincidencia parcial de texto).
+- `/bonos` (o "🎁 Bonos Bienvenida") — lista las casas de apuestas con
+  enlace de referido y su bono de bienvenida, configuradas en
+  `src/config/bonuses.ts` (edita ese array para añadir/quitar casas). Si
+  está vacío, responde que todavía no hay bonos configurados.
 
 ## Limitaciones conocidas de esta primera versión
 

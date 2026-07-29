@@ -1,5 +1,6 @@
 import { Markup, Telegraf, type Context } from "telegraf";
 import { env } from "./config/env";
+import { BONUS_OFFERS } from "./config/bonuses";
 import { analyzeTicket, type TicketInfo } from "./tickets/analyzeTicket";
 import {
   createPendingBet,
@@ -22,7 +23,11 @@ export const bot = new Telegraf(env.telegramBotToken, { handlerTimeout: Infinity
 const START_BUTTON_TEXT = "🏠 Empezar";
 const PENDIENTES_BUTTON_TEXT = "📝 Pendientes";
 const STATS_BUTTON_TEXT = "📊 Stats";
-const mainKeyboard = Markup.keyboard([[START_BUTTON_TEXT, PENDIENTES_BUTTON_TEXT, STATS_BUTTON_TEXT]]).resize();
+const BONOS_BUTTON_TEXT = "🎁 Bonos Bienvenida";
+const mainKeyboard = Markup.keyboard([
+  [START_BUTTON_TEXT, PENDIENTES_BUTTON_TEXT],
+  [STATS_BUTTON_TEXT, BONOS_BUTTON_TEXT],
+]).resize();
 
 async function sendWelcome(ctx: Context) {
   await ctx.reply(
@@ -35,6 +40,25 @@ async function sendWelcome(ctx: Context) {
 
 bot.start(sendWelcome);
 bot.hears(START_BUTTON_TEXT, sendWelcome);
+
+async function showBonuses(ctx: Context) {
+  if (BONUS_OFFERS.length === 0) {
+    await ctx.reply("🎁 Todavía no hay bonos configurados. ¡Vuelve pronto!");
+    return;
+  }
+
+  const lines = ["🎁 *Bonos de bienvenida*", ""];
+  for (const offer of BONUS_OFFERS) {
+    lines.push(`*${offer.name}*${offer.bonus ? ` — ${offer.bonus}` : ""}`);
+    lines.push(offer.url);
+    lines.push("");
+  }
+
+  await ctx.reply(lines.join("\n").trim(), { parse_mode: "Markdown" });
+}
+
+bot.command("bonos", showBonuses);
+bot.hears(BONOS_BUTTON_TEXT, showBonuses);
 
 function parseDecimalInput(text: string): number | null {
   const value = Number(text.replace(",", ".").trim());
