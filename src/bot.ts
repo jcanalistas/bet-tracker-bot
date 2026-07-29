@@ -6,6 +6,7 @@ import {
   createPendingBet,
   getBet,
   getBetsForExport,
+  getDetailedStats,
   getPendingBets,
   getProfitSeries,
   markBetLost,
@@ -14,11 +15,14 @@ import {
   formatMoney,
   type BetInput,
   type StatsPeriod,
+  type StatsSummary,
 } from "./stats/betsStore";
 import { setPendingStake, consumePendingStake, setPendingOdds, consumePendingOdds } from "./state/pendingInput";
 import { isPremium, setPremium } from "./premium/premiumStore";
 import { renderProfitChart } from "./charts/profitChart";
 import { betsToCsv } from "./export/csvExport";
+import { findBetterOdds } from "./odds/matchOdds";
+import { generateBettingAnalysis } from "./analysis/aiAnalysis";
 
 // Por defecto Telegraf corta el procesamiento de cada update a los 90s
 // (handlerTimeout); leer un ticket con la visión de Gemini puede tardar más
@@ -93,7 +97,7 @@ bot.command("premium", async (ctx) => {
     return;
   }
   await ctx.reply(
-    "⭐ *Premium* desbloquea en /stats: filtros por deporte y por simple/combinada, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
+    "⭐ *Premium* desbloquea en /stats: análisis detallado por deporte y tipo, análisis con IA, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
       "Todavía no hay pago automático — escríbeme por Telegram para activarlo.",
     { parse_mode: "Markdown" }
   );
@@ -151,7 +155,10 @@ async function showBonuses(ctx: Context) {
     lines.push("");
   }
 
-  await ctx.reply(lines.join("\n").trim(), { parse_mode: "MarkdownV2" });
+  await ctx.reply(lines.join("\n").trim(), {
+    parse_mode: "MarkdownV2",
+    link_preview_options: { is_disabled: true },
+  });
 }
 
 bot.command("bonos", showBonuses);
@@ -199,13 +206,48 @@ function describeBet(bet: BetDescription, stake: number): string {
   return lines.filter((l): l is string => l !== null).join("\n");
 }
 
+// Comparador de cuotas: se llama DESPUÉS de mandar la confirmación de
+// registro (mensaje aparte, nunca bloquea ni retrasa el registro en sí).
+// Solo compara fútbol/tenis, apuestas simples y cuando el partido se
+// identifica sin ambigüedad — ver findBetterOdds para el detalle del
+// alcance. Si no hay nada mejor (o no se puede comparar), no manda nada.
+async function maybeSendBetterOdds(ctx: Context, ticket: TicketInfo, currentOdds: number) {
+  let offers;
+  try {
+    offers = await findBetterOdds({
+      sport: ticket.sport,
+      betType: ticket.betType,
+      matchText: ticket.match,
+      currentOdds,
+      apiKey: env.oddsApiKey,
+    });
+  } catch (err) {
+    console.error("Error comparando cuotas:", err);
+    return;
+  }
+
+  if (offers.length === 0) return;
+
+  const intro = escapeMarkdownV2(`Tenías esta apuesta a ${formatMoney(currentOdds)}€. Aquí puedes conseguir más:`);
+  const lines = ["💰 *Mejor cuota disponible*", "", intro, ""];
+  for (const offer of offers.slice(0, 3)) {
+    const name = escapeMarkdownV2(offer.house.name);
+    const url = escapeMarkdownV2Url(offer.house.url);
+    const oddsLabel = escapeMarkdownV2(formatMoney(offer.odds));
+    lines.push(`*[${name}](${url})* — ${oddsLabel}`);
+  }
+
+  await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2", link_preview_options: { is_disabled: true } });
+}
+
 async function registerBet(ctx: Context, userId: string, ticket: TicketInfo, stake: number) {
+  const estimatedOdds = ticket.odds ? parseDecimalInput(ticket.odds) : null;
   const input: BetInput = {
     userId,
     sport: ticket.sport,
     match: ticket.match,
     betType: ticket.betType,
-    estimatedOdds: ticket.odds ? parseDecimalInput(ticket.odds) : null,
+    estimatedOdds,
     stake,
   };
   const betId = await createPendingBet(input);
@@ -214,6 +256,10 @@ async function registerBet(ctx: Context, userId: string, ticket: TicketInfo, sta
     parse_mode: "Markdown",
     ...pendingBetKeyboard(betId),
   });
+
+  if (estimatedOdds !== null) {
+    await maybeSendBetterOdds(ctx, ticket, estimatedOdds);
+  }
 }
 
 bot.on("photo", async (ctx) => {
@@ -336,11 +382,8 @@ async function askStatsPeriod(ctx: Context) {
 // Filtros y extras avanzados: solo premium.
 function statsFilterKeyboard(period: StatsPeriod) {
   return Markup.inlineKeyboard([
-    [
-      Markup.button.callback("⭐ Simple", `statsf:${period}:simple`),
-      Markup.button.callback("⭐ Combinada", `statsf:${period}:combinada`),
-    ],
-    [Markup.button.callback("⭐ Por deporte", `statsf:${period}:deporte`)],
+    [Markup.button.callback("⭐ Análisis detallado", `statsf:${period}:detallado`)],
+    [Markup.button.callback("⭐ Análisis IA", `statsf:${period}:ia`)],
     [
       Markup.button.callback("⭐ Gráfica", `statsf:${period}:grafica`),
       Markup.button.callback("⭐ Exportar CSV", `statsf:${period}:csv`),
@@ -396,24 +439,77 @@ bot.action(/^stats:(mes|anio|historico)$/, async (ctx) => {
   await showStats(ctx, period);
 });
 
-bot.action(/^statsf:(mes|anio|historico):(simple|combinada)$/, async (ctx) => {
+function formatSummaryLine(label: string, summary: StatsSummary): string {
+  const resolved = summary.won + summary.lost;
+  const profitIcon = summary.netProfit > 0 ? "📈" : summary.netProfit < 0 ? "📉" : "➖";
+  const hitRateLabel = resolved > 0 ? `${formatMoney(summary.hitRate)}%` : "—";
+  return `*${label}*: ${summary.total} · 🎯 ${hitRateLabel} · ${profitIcon} ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`;
+}
+
+bot.action(/^statsf:(mes|anio|historico):detallado$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
-  const filter = ctx.match[2];
+  const userId = String(ctx.from!.id);
   await safeAnswerCbQuery(ctx);
-  if (!(await isPremium(String(ctx.from!.id)))) {
+  if (!(await isPremium(userId))) {
     await replyPremiumLocked(ctx);
     return;
   }
-  await showStats(ctx, period, filter);
+
+  let detailed;
+  try {
+    detailed = await getDetailedStats(userId, period);
+  } catch (err) {
+    console.error("No se pudo obtener el análisis detallado:", err);
+    await ctx.reply("⚠️ No se pudo obtener el análisis detallado. Revisa los logs.");
+    return;
+  }
+
+  const lines = [`🔎 *Análisis detallado* — ${PERIOD_LABELS[period]}`, "", "*Por tipo*"];
+  lines.push(formatSummaryLine("Simple", detailed.simple));
+  lines.push(formatSummaryLine("Combinada", detailed.combinada));
+  lines.push("", "*Por deporte*");
+  if (detailed.bySport.length === 0) {
+    lines.push("_Sin apuestas en este periodo._");
+  } else {
+    for (const { sport, summary } of detailed.bySport) {
+      lines.push(formatSummaryLine(sport, summary));
+    }
+  }
+
+  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
 });
 
-bot.action(/^statsf:(mes|anio|historico):deporte$/, async (ctx) => {
+bot.action(/^statsf:(mes|anio|historico):ia$/, async (ctx) => {
+  const period = ctx.match[1] as StatsPeriod;
+  const userId = String(ctx.from!.id);
   await safeAnswerCbQuery(ctx);
-  if (!(await isPremium(String(ctx.from!.id)))) {
+  if (!(await isPremium(userId))) {
     await replyPremiumLocked(ctx);
     return;
   }
-  await ctx.reply("✍️ Escribe /stats seguido del deporte, por ejemplo: /stats tenis");
+
+  let detailed;
+  try {
+    detailed = await getDetailedStats(userId, period);
+  } catch (err) {
+    console.error("No se pudo obtener los datos para el análisis IA:", err);
+    await ctx.reply("⚠️ No se pudo generar el análisis. Revisa los logs.");
+    return;
+  }
+
+  if (detailed.bySport.length === 0) {
+    await ctx.reply("No hay apuestas en este periodo para analizar.");
+    return;
+  }
+
+  await ctx.reply("🤖 Generando análisis...");
+  try {
+    const analysis = await generateBettingAnalysis(detailed, env.geminiApiKey);
+    await ctx.reply(`🤖 Análisis IA — ${PERIOD_LABELS[period]}\n\n${analysis}`);
+  } catch (err) {
+    console.error("No se pudo generar el análisis IA:", err);
+    await ctx.reply("⚠️ No se pudo generar el análisis. Inténtalo de nuevo en un momento.");
+  }
 });
 
 bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {

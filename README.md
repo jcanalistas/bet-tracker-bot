@@ -7,10 +7,12 @@ Metrika): cero fricción de instalar nada, vive donde ya está el apostador.
 2. El bot la lee (visión de Gemini) y la registra automáticamente:
    deporte, partido (equipos/jugadores + selección), tipo (simple/combinada),
    cuota e importe.
-3. Más tarde la marcas como ✅ Ganada o ❌ Perdida con un botón — el
+3. Si hay una casa afiliada con mejor cuota para esa misma apuesta, te lo
+   dice justo después en un segundo mensaje, con el enlace de registro.
+4. Más tarde la marcas como ✅ Ganada o ❌ Perdida con un botón — el
    beneficio se calcula solo, con la cuota que ya se leyó del ticket (no
    hace falta volver a escribirla).
-4. `/stats` — aciertos, beneficio, con filtros por deporte y por
+5. `/stats` — aciertos, beneficio, con filtros por deporte y por
    simple/combinada.
 
 Multi-usuario desde el primer día: cada persona que hable con el bot tiene
@@ -27,6 +29,7 @@ trackea.
 - Node.js 20+
 - Una API key de Gemini (gratis, Google AI Studio)
 - Un bot de Telegram
+- (Opcional) Una API key de [The Odds API](https://the-odds-api.com), para el comparador de cuotas
 
 ## 1. Crear el bot de Telegram
 
@@ -50,7 +53,10 @@ cp .env.example .env
 ```
 
 Rellena `TELEGRAM_BOT_TOKEN` y `GEMINI_API_KEY`. El resto (`PUBLIC_URL`,
-`WEBHOOK_SECRET_PATH`) se completan al desplegar (paso 5).
+`WEBHOOK_SECRET_PATH`) se completan al desplegar (paso 5). `OWNER_TELEGRAM_ID`
+y `ODDS_API_KEY` son opcionales — sin ellos, /premium_on/off y el
+comparador de cuotas simplemente no se activan, el resto del bot funciona
+igual.
 
 ## 4. Instalar dependencias
 
@@ -60,7 +66,7 @@ npm install
 
 ## 5. Desplegar en Cloud Run
 
-### 5.1 Subir los secretos (token del bot y API key de Gemini)
+### 5.1 Subir los secretos (token del bot, API key de Gemini y, si la tienes, de The Odds API)
 
 Se guardan en Secret Manager en vez de como variables de entorno planas,
 para que no queden visibles en la consola de Cloud Run:
@@ -68,13 +74,15 @@ para que no queden visibles en la consola de Cloud Run:
 ```bash
 echo -n "TU_TOKEN_DE_TELEGRAM" | gcloud secrets create telegram-bot-token --data-file=-
 echo -n "TU_API_KEY_DE_GEMINI" | gcloud secrets create gemini-api-key --data-file=-
+echo -n "TU_API_KEY_DE_ODDS_API" | gcloud secrets create odds-api-key --data-file=-
 ```
 
-Si alguna vez regeneras alguna de las dos, sube una nueva versión:
+Si alguna vez regeneras alguna, sube una nueva versión:
 
 ```bash
 echo -n "NUEVO_VALOR" | gcloud secrets versions add telegram-bot-token --data-file=-
 echo -n "NUEVO_VALOR" | gcloud secrets versions add gemini-api-key --data-file=-
+echo -n "NUEVO_VALOR" | gcloud secrets versions add odds-api-key --data-file=-
 ```
 
 ### 5.2 Construir y desplegar (primera vez)
@@ -84,8 +92,8 @@ gcloud run deploy bet-tracker-bot \
   --source . \
   --region europe-southwest1 \
   --allow-unauthenticated \
-  --set-env-vars WEBHOOK_SECRET_PATH=UNA_CADENA_ALEATORIA \
-  --set-secrets TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,GEMINI_API_KEY=gemini-api-key:latest \
+  --set-env-vars WEBHOOK_SECRET_PATH=UNA_CADENA_ALEATORIA,OWNER_TELEGRAM_ID=TU_ID_DE_TELEGRAM \
+  --set-secrets TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,GEMINI_API_KEY=gemini-api-key:latest,ODDS_API_KEY=odds-api-key:latest \
   --timeout=300
 ```
 
@@ -150,7 +158,9 @@ En Telegram, háblale al bot:
 - Manda la **foto del ticket** — el bot la lee y registra la apuesta
   automáticamente (deporte, partido, simple/combinada, cuota e importe). Si
   no consigue leer el importe apostado en la imagen, te lo pregunta antes de
-  registrarla.
+  registrarla. Justo después (mensaje aparte, no bloquea el registro) mira
+  si alguna casa afiliada tiene mejor cuota para esa apuesta — ver
+  "Comparador de cuotas" más abajo para el alcance exacto.
 - `/pendientes` (o "📝 Pendientes") — lista las apuestas sin resolver, cada
   una con botones **"✅ Ganada"** / **"❌ Perdida"**. Ambas se resuelven al
   momento sin preguntar nada más: "❌ Perdida" resta el importe apostado,
@@ -162,10 +172,14 @@ En Telegram, háblale al bot:
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
   resueltas (✅/❌), % de acierto y beneficio. Debajo del resumen hay botones
   ⭐ con filtros y extras — todos exclusivos de **Premium** (ver abajo):
-  - ⭐ Simple / ⭐ Combinada — filtra solo por ese tipo (equivale a
-    `/stats simple` o `/stats combinada`, también premium).
-  - ⭐ Por deporte — te dice que escribas `/stats <deporte>` (ej.
-    `/stats tenis`), que filtra por coincidencia parcial de texto.
+  - ⭐ Análisis detallado — desglose por tipo (simple/combinada) y por
+    deporte en un solo mensaje: apuestas, % de acierto y beneficio de cada
+    uno, sin tener que ir eligiendo filtro por filtro (`/stats simple`,
+    `/stats combinada` y `/stats <deporte>` por texto siguen funcionando
+    igual, también premium, si prefieres uno suelto).
+  - ⭐ Análisis IA — le pasa ese mismo desglose a Gemini y pide un análisis
+    escueto (máximo 5 líneas): dónde ganas, dónde pierdes y qué hacer para
+    mejorar.
   - ⭐ Gráfica — genera una imagen con la evolución del beneficio
     acumulado apuesta a apuesta, dentro del periodo elegido (necesita al
     menos 2 apuestas resueltas en ese periodo).
@@ -191,10 +205,38 @@ Cualquier otro usuario que intente esos comandos no obtiene respuesta (ni
 confirmación de que existen). El estado se guarda en la colección
 `users` de Firestore.
 
+### Comparador de cuotas
+
+Usa [The Odds API](https://the-odds-api.com) (gratis hasta 500 créditos/mes;
+1 consulta = 1 mercado × nº de regiones, aquí siempre `eu,uk` = 2 créditos).
+Deliberadamente limitado — si algo no encaja, no manda nada en vez de
+arriesgar una comparación equivocada:
+
+- Solo apuestas **simples** (las combinadas quedan fuera: emparejar cada
+  pata por separado y recalcular la cuota conjunta es mucho más complejo).
+- Solo **fútbol** (La Liga, Premier League, Bundesliga, Champions League —
+  la fase que esté activa) y **tenis** (cualquier torneo ATP/WTA que la API
+  tenga activo esa semana; no hay una clave fija "ATP", se resuelve en vivo
+  contra su catálogo cada hora).
+- Solo mercado **ganador del partido** (1X2 en fútbol, gana el partido en
+  tenis) — nada de hándicaps, sets, over/under, etc.
+- Solo compara contra las casas de `src/config/bonuses.ts` que la propia
+  API cubre de verdad (comprobado a mano): **Winamax, Betfair, William
+  Hill, Betway y 888 Sport**. Sportium y PokerStars no aparecen en su
+  catálogo, así que quedan fuera del comparador (siguen apareciendo en
+  🎁 Bonos Bienvenida).
+- El equipo/jugador del ticket se empareja con el de la API por
+  solapamiento de palabras (evita confundir derbis tipo Real Madrid /
+  Atlético Madrid / Real Sociedad); si hay cualquier ambigüedad, no compara.
+
+Con varias ligas de fútbol + los torneos de tenis activos, una sola
+comparación puede consultar varias ligas seguidas hasta encontrar el
+partido — el gasto real de créditos por ticket varía bastante semana a
+semana (más partidos de tenis en juego = más consultas). Vigila el consumo
+en el dashboard de The Odds API los primeros días.
+
 ## Limitaciones conocidas de esta primera versión
 
-- No hay comparador de cuotas con casas afiliadas todavía (ver "Próximos
-  pasos" más abajo) — es puro tracking.
 - El bot es público: cualquiera que conozca su usuario de Telegram puede
   hablarle y empezar a registrar sus propias apuestas (aisladas del resto).
   No hay registro/login más allá del ID de Telegram.
@@ -205,9 +247,11 @@ confirmación de que existen). El estado se guarda en la colección
 
 ## Próximos pasos pendientes de decidir
 
-1. Validar qué API de cuotas usar para el comparador de afiliados (coste,
-   cobertura de ligas/mercados nicho).
-2. Decidir con qué casas de apuestas empezar la afiliación.
+1. Ampliar el comparador de cuotas más allá de fútbol/tenis y del mercado
+   ganador, y decidir si pasar a un plan de pago de The Odds API según el
+   consumo real de créditos.
+2. Sumar más casas afiliadas que sí cubra la API (o buscar otra fuente de
+   cuotas para Sportium/PokerStars).
 3. Revisar el modelo de datos multi-usuario según necesidades reales de uso
    (por ahora: aislamiento simple por ID de Telegram en la colección
    `bets`).
@@ -235,6 +279,14 @@ src/
     profitChart.ts               Gráfica de evolución del beneficio (SVG -> PNG con sharp), premium
   export/
     csvExport.ts                 Exportación del historial a CSV, premium
+  odds/
+    oddsApiClient.ts              Cliente HTTP de The Odds API
+    leagueCatalog.ts               Resuelve qué ligas/torneos comprobar (con caché de 1h)
+    matching.ts                    Emparejar equipos/jugadores y detectar el lado de la selección
+    bookmakerMap.ts                 Mapeo de casas de bonuses.ts a claves de bookmaker de la API
+    matchOdds.ts                    Orquesta todo lo anterior: busca mejor cuota para una apuesta
+  analysis/
+    aiAnalysis.ts                   Análisis IA (Gemini) del desglose de stats, premium
   stats/
     firestore.ts                Cliente de Firestore (vía ADC)
     betsStore.ts                 Modelo de apuesta + CRUD (pendiente/ganada/perdida) y estadísticas

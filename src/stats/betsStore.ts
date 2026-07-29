@@ -129,9 +129,7 @@ async function getUserBets(userId: string, options: StatsOptions): Promise<Bet[]
   return bets;
 }
 
-export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {
-  const bets = await getUserBets(userId, options);
-
+function summarize(bets: Bet[]): StatsSummary {
   const pending = bets.filter((b) => b.status === "pendiente").length;
   const won = bets.filter((b) => b.status === "ganada").length;
   const lost = bets.filter((b) => b.status === "perdida").length;
@@ -140,6 +138,31 @@ export async function getStatsSummary(userId: string, options: StatsOptions = {}
   const hitRate = resolved > 0 ? cleanFloat((won / resolved) * 100) : 0;
 
   return { total: bets.length, pending, won, lost, hitRate, netProfit };
+}
+
+export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {
+  const bets = await getUserBets(userId, options);
+  return summarize(bets);
+}
+
+export interface DetailedStats {
+  bySport: { sport: string; summary: StatsSummary }[];
+  simple: StatsSummary;
+  combinada: StatsSummary;
+}
+
+/** Desglose por deporte y por tipo (simple/combinada) en un único viaje a Firestore, para "⭐ Análisis detallado". */
+export async function getDetailedStats(userId: string, period: StatsPeriod): Promise<DetailedStats> {
+  const bets = await getUserBets(userId, { period });
+
+  const sports = [...new Set(bets.map((b) => b.sport))].sort((a, b) => a.localeCompare(b));
+  const bySport = sports.map((sport) => ({ sport, summary: summarize(bets.filter((b) => b.sport === sport)) }));
+
+  return {
+    bySport,
+    simple: summarize(bets.filter((b) => b.betType === "simple")),
+    combinada: summarize(bets.filter((b) => b.betType === "combinada")),
+  };
 }
 
 /** Todas las apuestas del usuario que cumplen el filtro/periodo, en orden cronológico de registro — para exportar CSV. */

@@ -23,4 +23,9 @@ export const env = {
   // esos comandos simplemente no los puede usar nadie, en vez de tumbar el
   // servidor al arrancar.
   ownerTelegramId: process.env.OWNER_TELEGRAM_ID,
+  // API key de The Odds API (the-odds-api.com), para el comparador de
+  // cuotas. Opcional a propósito — si no está definida, el comparador
+  // simplemente no se ejecuta (el registro del ticket sigue funcionando
+  // igual).
+  oddsApiKey: process.env.ODDS_API_KEY,
 };
