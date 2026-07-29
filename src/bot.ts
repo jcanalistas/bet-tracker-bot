@@ -5,7 +5,9 @@ import { analyzeTicket, type TicketInfo } from "./tickets/analyzeTicket";
 import {
   createPendingBet,
   getBet,
+  getBetsForExport,
   getPendingBets,
+  getProfitSeries,
   markBetLost,
   markBetWon,
   getStatsSummary,
@@ -14,6 +16,9 @@ import {
   type StatsPeriod,
 } from "./stats/betsStore";
 import { setPendingStake, consumePendingStake, setPendingOdds, consumePendingOdds } from "./state/pendingInput";
+import { isPremium, setPremium } from "./premium/premiumStore";
+import { renderProfitChart } from "./charts/profitChart";
+import { betsToCsv } from "./export/csvExport";
 
 // Por defecto Telegraf corta el procesamiento de cada update a los 90s
 // (handlerTimeout); leer un ticket con la visión de Gemini puede tardar más
@@ -41,6 +46,55 @@ async function sendWelcome(ctx: Context) {
 
 bot.start(sendWelcome);
 bot.hears(START_BUTTON_TEXT, sendWelcome);
+
+function isOwner(ctx: Context): boolean {
+  return env.ownerTelegramId !== undefined && String(ctx.from?.id) === env.ownerTelegramId;
+}
+
+async function replyPremiumLocked(ctx: Context) {
+  await ctx.reply(
+    "🔒 *Contenido premium*\nEsta función es solo para usuarios premium. Escribe /premium para más información.",
+    { parse_mode: "Markdown" }
+  );
+}
+
+bot.command("premium", async (ctx) => {
+  const userId = String(ctx.from!.id);
+  if (await isPremium(userId)) {
+    await ctx.reply("⭐ Ya tienes Premium activo. Disfruta de los filtros avanzados en /stats.");
+    return;
+  }
+  await ctx.reply(
+    "⭐ *Premium* desbloquea en /stats: filtros por deporte y por simple/combinada, gráfica de evolución del beneficio y exportar tu historial a CSV.\n\n" +
+      "Todavía no hay pago automático — escríbeme por Telegram para activarlo.",
+    { parse_mode: "Markdown" }
+  );
+});
+
+// Activación manual mientras no hay pasarela de pago: solo el dueño del
+// bot (OWNER_TELEGRAM_ID) puede usar estos dos comandos. Para cualquier
+// otro usuario no hacen nada — ni siquiera revelan que existen.
+bot.command("premium_on", async (ctx) => {
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.message.text.split(/\s+/)[1];
+  if (!targetId) {
+    await ctx.reply("Uso: /premium_on <ID de Telegram>");
+    return;
+  }
+  await setPremium(targetId, true);
+  await ctx.reply(`✅ Premium activado para ${targetId}.`);
+});
+
+bot.command("premium_off", async (ctx) => {
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.message.text.split(/\s+/)[1];
+  if (!targetId) {
+    await ctx.reply("Uso: /premium_off <ID de Telegram>");
+    return;
+  }
+  await setPremium(targetId, false);
+  await ctx.reply(`✅ Premium desactivado para ${targetId}.`);
+});
 
 // MarkdownV2 (a diferencia del modo "Markdown" clásico usado en el resto
 // del bot) sí soporta anidar negrita + enlace en una misma entidad, que es
@@ -244,6 +298,21 @@ async function askStatsPeriod(ctx: Context) {
   await ctx.reply("📊 ¿Qué periodo quieres consultar?", periodKeyboard());
 }
 
+// Filtros y extras avanzados: solo premium.
+function statsFilterKeyboard(period: StatsPeriod) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback("⭐ Simple", `statsf:${period}:simple`),
+      Markup.button.callback("⭐ Combinada", `statsf:${period}:combinada`),
+    ],
+    [Markup.button.callback("⭐ Por deporte", `statsf:${period}:deporte`)],
+    [
+      Markup.button.callback("⭐ Gráfica", `statsf:${period}:grafica`),
+      Markup.button.callback("⭐ Exportar CSV", `statsf:${period}:csv`),
+    ],
+  ]);
+}
+
 async function showStats(ctx: Context, period: StatsPeriod, filter?: string) {
   const userId = String(ctx.from!.id);
   let summary;
@@ -268,13 +337,20 @@ async function showStats(ctx: Context, period: StatsPeriod, filter?: string) {
     `${profitIcon} Beneficio: ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`,
   ];
 
-  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...statsFilterKeyboard(period) });
 }
 
-bot.command("stats", (ctx) => {
+bot.command("stats", async (ctx) => {
   const filter = ctx.message.text.split(/\s+/).slice(1).join(" ").trim() || undefined;
-  if (filter) return showStats(ctx, "historico", filter);
-  return askStatsPeriod(ctx);
+  if (filter) {
+    if (!(await isPremium(String(ctx.from.id)))) {
+      await replyPremiumLocked(ctx);
+      return;
+    }
+    await showStats(ctx, "historico", filter);
+    return;
+  }
+  await askStatsPeriod(ctx);
 });
 bot.hears(STATS_BUTTON_TEXT, askStatsPeriod);
 
@@ -283,6 +359,81 @@ bot.action(/^stats:(mes|anio|historico)$/, async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageReplyMarkup(undefined);
   await showStats(ctx, period);
+});
+
+bot.action(/^statsf:(mes|anio|historico):(simple|combinada)$/, async (ctx) => {
+  const period = ctx.match[1] as StatsPeriod;
+  const filter = ctx.match[2];
+  await ctx.answerCbQuery();
+  if (!(await isPremium(String(ctx.from!.id)))) {
+    await replyPremiumLocked(ctx);
+    return;
+  }
+  await showStats(ctx, period, filter);
+});
+
+bot.action(/^statsf:(mes|anio|historico):deporte$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  if (!(await isPremium(String(ctx.from!.id)))) {
+    await replyPremiumLocked(ctx);
+    return;
+  }
+  await ctx.reply("✍️ Escribe /stats seguido del deporte, por ejemplo: /stats tenis");
+});
+
+bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {
+  const period = ctx.match[1] as StatsPeriod;
+  const userId = String(ctx.from!.id);
+  await ctx.answerCbQuery();
+  if (!(await isPremium(userId))) {
+    await replyPremiumLocked(ctx);
+    return;
+  }
+
+  let points;
+  try {
+    points = await getProfitSeries(userId, { period });
+  } catch (err) {
+    console.error("No se pudo generar la gráfica:", err);
+    await ctx.reply("⚠️ No se pudo generar la gráfica. Revisa los logs.");
+    return;
+  }
+
+  if (points.length < 2) {
+    await ctx.reply("📈 Todavía no hay suficientes apuestas resueltas en este periodo para dibujar una gráfica.");
+    return;
+  }
+
+  const chart = await renderProfitChart(points);
+  await ctx.replyWithPhoto({ source: chart }, { caption: `📈 Evolución del beneficio — ${PERIOD_LABELS[period]}` });
+});
+
+bot.action(/^statsf:(mes|anio|historico):csv$/, async (ctx) => {
+  const period = ctx.match[1] as StatsPeriod;
+  const userId = String(ctx.from!.id);
+  await ctx.answerCbQuery();
+  if (!(await isPremium(userId))) {
+    await replyPremiumLocked(ctx);
+    return;
+  }
+
+  let bets;
+  try {
+    bets = await getBetsForExport(userId, { period });
+  } catch (err) {
+    console.error("No se pudo exportar el historial:", err);
+    await ctx.reply("⚠️ No se pudo exportar el historial. Revisa los logs.");
+    return;
+  }
+
+  if (bets.length === 0) {
+    await ctx.reply("No hay apuestas en este periodo para exportar.");
+    return;
+  }
+
+  // BOM al principio para que Excel detecte UTF-8 y no rompa los acentos.
+  const csv = "\uFEFF" + betsToCsv(bets);
+  await ctx.replyWithDocument({ source: Buffer.from(csv, "utf-8"), filename: `historial-apuestas-${period}.csv` });
 });
 
 // Manejador genérico de texto: registrado el ÚLTIMO a propósito. Los

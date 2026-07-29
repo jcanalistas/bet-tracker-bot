@@ -160,16 +160,36 @@ En Telegram, háblale al bot:
 - `/stats` (o "📊 Stats") — pregunta primero el periodo con botones (**Mes
   actual**, **Año actual**, **Histórico**, según la fecha en que se
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
-  resueltas (✅/❌), % de acierto y beneficio. No se anuncian en /start para
-  no abrumar, pero también admite filtros de texto (van directos a
-  histórico, sin preguntar el periodo):
-  - `/stats simple` o `/stats combinada` — filtra solo por ese tipo.
-  - `/stats <deporte>` (ej. `/stats tenis`) — filtra por deporte
-    (coincidencia parcial de texto).
+  resueltas (✅/❌), % de acierto y beneficio. Debajo del resumen hay botones
+  ⭐ con filtros y extras — todos exclusivos de **Premium** (ver abajo):
+  - ⭐ Simple / ⭐ Combinada — filtra solo por ese tipo (equivale a
+    `/stats simple` o `/stats combinada`, también premium).
+  - ⭐ Por deporte — te dice que escribas `/stats <deporte>` (ej.
+    `/stats tenis`), que filtra por coincidencia parcial de texto.
+  - ⭐ Gráfica — genera una imagen con la evolución del beneficio
+    acumulado apuesta a apuesta, dentro del periodo elegido (necesita al
+    menos 2 apuestas resueltas en ese periodo).
+  - ⭐ Exportar CSV — manda un archivo `.csv` con el historial completo del
+    periodo elegido (fechas, partido, tipo, cuotas, importe, beneficio),
+    listo para abrir en Excel/Sheets.
 - `/bonos` (o "🎁 Bonos Bienvenida") — lista las casas de apuestas con
   enlace de referido y su bono de bienvenida, configuradas en
   `src/config/bonuses.ts` (edita ese array para añadir/quitar casas). Si
   está vacío, responde que todavía no hay bonos configurados.
+- `/premium` — cualquier usuario puede consultar si tiene premium activo,
+  o ver qué desbloquea si no lo tiene.
+
+### Premium
+
+Sin pasarela de pago todavía: se activa/desactiva a mano. Solo tú (el
+`OWNER_TELEGRAM_ID` que configures) puedes usar:
+
+- `/premium_on <ID de Telegram>` — activa premium a ese usuario.
+- `/premium_off <ID de Telegram>` — se lo desactiva.
+
+Cualquier otro usuario que intente esos comandos no obtiene respuesta (ni
+confirmación de que existen). El estado se guarda en la colección
+`users` de Firestore.
 
 ## Limitaciones conocidas de esta primera versión
 
@@ -191,7 +211,8 @@ En Telegram, háblale al bot:
 3. Revisar el modelo de datos multi-usuario según necesidades reales de uso
    (por ahora: aislamiento simple por ID de Telegram en la colección
    `bets`).
-4. Definir qué entra en la capa premium y el precio.
+4. Montar una pasarela de pago real para premium (hoy se activa a mano con
+   `/premium_on`) y fijar el precio.
 
 ## Estructura del proyecto
 
@@ -201,12 +222,19 @@ src/
   server.ts                 Servidor Express + registro del webhook
   config/
     env.ts                   Carga de variables de entorno
+    bonuses.ts                Casas de apuestas afiliadas para "🎁 Bonos Bienvenida"
   gemini/
     retry.ts                  Reintentos con backoff ante errores transitorios de la API de Gemini
   tickets/
     analyzeTicket.ts           Lectura del ticket por visión de Gemini (deporte, partido, tipo, cuota, importe)
   state/
     pendingInput.ts             Estado en Firestore a la espera de una respuesta del usuario (importe, o cuota si no se pudo leer del ticket)
+  premium/
+    premiumStore.ts             Estado premium por usuario en Firestore (colección `users`)
+  charts/
+    profitChart.ts               Gráfica de evolución del beneficio (SVG -> PNG con sharp), premium
+  export/
+    csvExport.ts                 Exportación del historial a CSV, premium
   stats/
     firestore.ts                Cliente de Firestore (vía ADC)
     betsStore.ts                 Modelo de apuesta + CRUD (pendiente/ganada/perdida) y estadísticas

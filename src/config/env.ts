@@ -18,4 +18,9 @@ export const env = {
   webhookSecretPath: required("WEBHOOK_SECRET_PATH"),
   port: Number(process.env.PORT ?? 8080),
   geminiApiKey: required("GEMINI_API_KEY"),
+  // ID numérico de Telegram del dueño del bot: único autorizado a usar
+  // /premium_on y /premium_off. Opcional a propósito — si no está definida,
+  // esos comandos simplemente no los puede usar nadie, en vez de tumbar el
+  // servidor al arrancar.
+  ownerTelegramId: process.env.OWNER_TELEGRAM_ID,
 };

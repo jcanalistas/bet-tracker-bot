@@ -108,7 +108,7 @@ export interface StatsOptions {
   period?: StatsPeriod;
 }
 
-export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {
+async function getUserBets(userId: string, options: StatsOptions): Promise<Bet[]> {
   const snapshot = await firestore.collection(COLLECTION).where("userId", "==", userId).get();
   let bets = snapshot.docs.map(toBet);
 
@@ -126,6 +126,12 @@ export async function getStatsSummary(userId: string, options: StatsOptions = {}
     }
   }
 
+  return bets;
+}
+
+export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {
+  const bets = await getUserBets(userId, options);
+
   const pending = bets.filter((b) => b.status === "pendiente").length;
   const won = bets.filter((b) => b.status === "ganada").length;
   const lost = bets.filter((b) => b.status === "perdida").length;
@@ -134,6 +140,32 @@ export async function getStatsSummary(userId: string, options: StatsOptions = {}
   const hitRate = resolved > 0 ? cleanFloat((won / resolved) * 100) : 0;
 
   return { total: bets.length, pending, won, lost, hitRate, netProfit };
+}
+
+/** Todas las apuestas del usuario que cumplen el filtro/periodo, en orden cronológico de registro — para exportar CSV. */
+export async function getBetsForExport(userId: string, options: StatsOptions = {}): Promise<Bet[]> {
+  const bets = await getUserBets(userId, options);
+  return [...bets].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export interface ProfitPoint {
+  /** Timestamp de resolución (ganada/perdida) de la apuesta. */
+  at: number;
+  cumulativeProfit: number;
+}
+
+/** Beneficio acumulado apuesta a apuesta, en orden cronológico de resolución — para la gráfica premium. Solo cuenta apuestas ya resueltas. */
+export async function getProfitSeries(userId: string, options: StatsOptions = {}): Promise<ProfitPoint[]> {
+  const bets = await getUserBets(userId, options);
+  const resolved = bets
+    .filter((b): b is Bet & { resolvedAt: number } => b.status !== "pendiente" && b.resolvedAt !== undefined)
+    .sort((a, b) => a.resolvedAt - b.resolvedAt);
+
+  let cumulative = 0;
+  return resolved.map((b) => {
+    cumulative = cleanFloat(cumulative + (b.profit ?? 0));
+    return { at: b.resolvedAt, cumulativeProfit: cumulative };
+  });
 }
 
 function toBet(doc: DocumentSnapshot): Bet {
