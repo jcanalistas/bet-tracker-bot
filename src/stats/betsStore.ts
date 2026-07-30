@@ -50,6 +50,13 @@ export async function getPendingBets(userId: string): Promise<Bet[]> {
   return snapshot.docs.map(toBet).sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Pendientes de TODOS los usuarios registradas hace más de `minAgeMs` — para el recordatorio diario, no filtra por userId a propósito. */
+export async function getStalePendingBets(minAgeMs: number): Promise<Bet[]> {
+  const cutoff = Date.now() - minAgeMs;
+  const snapshot = await firestore.collection(COLLECTION).where("status", "==", "pendiente").get();
+  return snapshot.docs.map(toBet).filter((b) => b.createdAt <= cutoff);
+}
+
 export async function markBetLost(id: string): Promise<number> {
   const bet = await getBet(id);
   if (!bet) throw new Error(`Apuesta no encontrada: ${id}`);
@@ -103,6 +110,10 @@ export interface StatsSummary {
   lost: number;
   hitRate: number; // % sobre las resueltas (ganadas + perdidas)
   netProfit: number;
+  /** Importe apostado en juego real (excluye nulas, que se devuelven sin riesgo). Base para el yield/ROI. */
+  totalStaked: number;
+  /** Yield o ROI: beneficio ÷ importe arriesgado, en %. Es la métrica que de verdad mide si una estrategia funciona, más allá del € neto. */
+  roi: number;
 }
 
 /** Rango [from, to) en ms desde epoch para el periodo pedido, o null si es histórico (sin filtrar). */
@@ -161,7 +172,13 @@ function summarize(bets: Bet[]): StatsSummary {
   const netProfit = cleanFloat(bets.reduce((sum, b) => sum + (b.profit ?? 0), 0));
   const hitRate = resolved > 0 ? cleanFloat((won / resolved) * 100) : 0;
 
-  return { total: bets.length, pending, won, lost, hitRate, netProfit };
+  // Solo cuenta lo que estuvo de verdad en riesgo: nula devuelve el importe
+  // íntegro (no hubo apuesta real) y pendiente aún no ha jugado su suerte.
+  const staked = bets.filter((b) => b.status === "ganada" || b.status === "perdida" || b.status === "cashout");
+  const totalStaked = cleanFloat(staked.reduce((sum, b) => sum + b.stake, 0));
+  const roi = totalStaked > 0 ? cleanFloat((netProfit / totalStaked) * 100) : 0;
+
+  return { total: bets.length, pending, won, lost, hitRate, netProfit, totalStaked, roi };
 }
 
 export async function getStatsSummary(userId: string, options: StatsOptions = {}): Promise<StatsSummary> {

@@ -522,6 +522,9 @@ async function showStats(ctx: Context, period: StatsPeriod, filter?: string) {
     `📌 Resueltas: ${resolved} (✅ ${summary.won} · ❌ ${summary.lost})`,
     resolved > 0 ? `🎯 Acierto: ${formatMoney(summary.hitRate)}%` : "🎯 Acierto: —",
     `${profitIcon} Beneficio: ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`,
+    summary.totalStaked > 0
+      ? `📐 Yield: ${summary.roi >= 0 ? "+" : ""}${formatMoney(summary.roi)}%`
+      : "📐 Yield: —",
   ];
 
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...statsFilterKeyboard(period) });
@@ -552,7 +555,8 @@ function formatSummaryLine(label: string, summary: StatsSummary): string {
   const resolved = summary.won + summary.lost;
   const profitIcon = summary.netProfit > 0 ? "📈" : summary.netProfit < 0 ? "📉" : "➖";
   const hitRateLabel = resolved > 0 ? `${formatMoney(summary.hitRate)}%` : "—";
-  return `*${label}*: ${summary.total} · 🎯 ${hitRateLabel} · ${profitIcon} ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€`;
+  const roiLabel = summary.totalStaked > 0 ? `${summary.roi >= 0 ? "+" : ""}${formatMoney(summary.roi)}%` : "—";
+  return `*${label}*: ${summary.total} · 🎯 ${hitRateLabel} · ${profitIcon} ${summary.netProfit >= 0 ? "+" : ""}${formatMoney(summary.netProfit)}€ · 📐 ${roiLabel}`;
 }
 
 function sportEmoji(sport: string): string {

@@ -50,4 +50,8 @@ export const env = {
   // Username del bot (sin @), para volver al chat tras pagar en Stripe
   // Checkout. Opcional: sin él, se usa PUBLIC_URL como destino de vuelta.
   telegramBotUsername: optional("TELEGRAM_BOT_USERNAME"),
+  // Protege el endpoint /internal/check-reminders (lo llama Cloud Scheduler
+  // una vez al día). Opcional a propósito: sin ella, el endpoint responde
+  // 404 y los recordatorios simplemente no se envían.
+  reminderSecret: optional("REMINDER_SECRET"),
 };

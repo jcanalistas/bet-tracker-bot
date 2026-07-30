@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { withRetry } from "../gemini/retry";
+import { withRetry, withTimeout } from "../gemini/retry";
 import { formatMoney, type DetailedStats } from "../stats/betsStore";
 
 const ANALYSIS_MODEL = "gemini-flash-latest";
@@ -63,7 +63,20 @@ export async function generateBettingAnalysis(detailed: DetailedStats, apiKey: s
   const prompt = buildPrompt(detailed);
 
   const response = await withRetry(
-    () => client.models.generateContent({ model: ANALYSIS_MODEL, contents: [{ text: prompt }] }),
+    () =>
+      withTimeout(
+        client.models.generateContent({
+          model: ANALYSIS_MODEL,
+          contents: [{ text: prompt }],
+          // Es un resumen de texto a partir de datos ya calculados, no un
+          // problema que requiera razonar: sin esto, Gemini 2.5 Flash mete
+          // un presupuesto de "pensamiento" automático que puede tardar
+          // minutos para una tarea así de simple.
+          config: { thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 400 },
+        }),
+        TIMEOUT_MS,
+        "Tiempo de espera agotado generando el análisis"
+      ),
     { retries: RETRIES, baseDelayMs: RETRY_BASE_DELAY_MS }
   );
 

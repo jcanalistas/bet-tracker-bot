@@ -248,7 +248,11 @@ En Telegram, háblale al bot:
 - `/stats` (o "📊 Stats") — pregunta primero el periodo con botones (**Mes
   actual**, **Año actual**, **Histórico**, según la fecha en que se
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
-  resueltas (✅/❌), % de acierto y beneficio. Debajo del resumen hay botones
+  resueltas (✅/❌), % de acierto, beneficio y **yield** (beneficio ÷ importe
+  arriesgado en apuestas ya resueltas, en %) — la métrica que de verdad usan
+  los apostadores para juzgar si una estrategia funciona, más allá del € neto
+  (dos apostadores con el mismo beneficio pero arriesgando importes muy
+  distintos no van igual de bien). Debajo del resumen hay botones
   ⭐ con filtros y extras — todos exclusivos de **Premium** (ver abajo):
   - ⭐ Stats completas — desglose por tipo (🔹 simple/🔀 combinada) y por
     deporte (con su emoji, ej. ⚽ Fútbol, 🎾 Tenis) en un solo mensaje:
@@ -327,6 +331,50 @@ partido — el gasto real de créditos por ticket varía bastante semana a
 semana (más partidos de tenis en juego = más consultas). Vigila el consumo
 en el dashboard de The Odds API los primeros días.
 
+## 7. Recordatorio de apuestas pendientes (opcional)
+
+Avisa por Telegram a cada usuario con apuestas pendientes desde hace un día
+o más, para que no se le olvide resolverlas y sus estadísticas no queden
+incompletas. Necesita un disparador externo (el propio servicio no tiene
+temporizadores en segundo plano: Cloud Run puede escalar a cero) — se monta
+con Cloud Scheduler llamando una vez al día a `/internal/check-reminders`.
+
+### 7.1 Subir el secreto y desplegar con él
+
+```bash
+echo -n "UNA_CADENA_ALEATORIA_DISTINTA" | gcloud secrets create reminder-secret --data-file=-
+
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+gcloud secrets add-iam-policy-binding reminder-secret \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud run services update bet-tracker-bot \
+  --region europe-southwest1 \
+  --update-secrets REMINDER_SECRET=reminder-secret:latest
+```
+
+### 7.2 Crear el job de Cloud Scheduler
+
+Sustituye `TU_CADENA_ALEATORIA` por el mismo valor que subiste como secreto
+(no hace falta que Scheduler lea el secreto: solo llama a la URL con la
+cadena ya incluida):
+
+```bash
+gcloud services enable cloudscheduler.googleapis.com
+
+gcloud scheduler jobs create http bet-tracker-reminders \
+  --location europe-southwest1 \
+  --schedule "0 10 * * *" \
+  --time-zone "Europe/Madrid" \
+  --uri "https://TU-URL-DE-CLOUD-RUN.a.run.app/internal/check-reminders?secret=TU_CADENA_ALEATORIA" \
+  --http-method POST
+```
+
+Esto lo dispara todos los días a las 10:00 (hora de Madrid). El coste es
+prácticamente nulo (Cloud Scheduler tiene 3 jobs gratis/mes y esto es 1
+ejecución/día).
+
 ## Limitaciones conocidas de esta primera versión
 
 - El bot es público: cualquiera que conozca su usuario de Telegram puede
@@ -349,6 +397,9 @@ en el dashboard de The Odds API los primeros días.
    `bets`).
 4. Pasar Stripe de modo Test a Live cuando quieras cobrar de verdad (ver
    "6. Configurar Stripe").
+5. Activar `--cpu-boost` en el despliegue de Cloud Run (gratis, más CPU solo
+   en los primeros segundos de un contenedor frío) para acortar el arranque
+   en frío sin coste continuo como `min-instances`.
 
 ## Estructura del proyecto
 
@@ -382,6 +433,8 @@ src/
   payments/
     stripeClient.ts                 Cliente de Stripe + creación de la sesión de Checkout
     stripeWebhook.ts                 Maneja checkout.session.completed / cancelación / impago
+  reminders/
+    pendingReminders.ts             Avisa por Telegram de apuestas pendientes desde hace días (Cloud Scheduler)
   stats/
     firestore.ts                Cliente de Firestore (vía ADC)
     betsStore.ts                 Modelo de apuesta + CRUD (pendiente/ganada/perdida) y estadísticas

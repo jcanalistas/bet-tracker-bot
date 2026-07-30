@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { withRetry } from "../gemini/retry";
+import { withRetry, withTimeout } from "../gemini/retry";
 
 export type BetType = "simple" | "combinada";
 
@@ -50,22 +50,6 @@ export async function analyzeTicket(ticketBuffer: Buffer, apiKey: string): Promi
   );
 
   return parseTicketInfo(response.text ?? "");
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${message} (${ms / 1000}s)`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
 }
 
 function parseTicketInfo(text: string): TicketInfo {

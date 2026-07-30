@@ -2,6 +2,7 @@ import express from "express";
 import { bot } from "./bot";
 import { env } from "./config/env";
 import { handleStripeWebhook } from "./payments/stripeWebhook";
+import { sendPendingReminders } from "./reminders/pendingReminders";
 
 // Red de seguridad: sin esto, un rechazo de promesa no capturado en
 // cualquier dependencia (p.ej. un timeout interno del SDK de Gemini) tumba
@@ -30,6 +31,22 @@ app.get("/", (_req, res) => {
 });
 
 app.use(bot.webhookCallback(webhookPath));
+
+// Lo llama Cloud Scheduler una vez al día. Sin REMINDER_SECRET configurada
+// (o si no coincide), responde 404 en vez de revelar que el endpoint existe.
+app.post("/internal/check-reminders", async (req, res) => {
+  if (!env.reminderSecret || req.query.secret !== env.reminderSecret) {
+    res.status(404).send("Not found");
+    return;
+  }
+  try {
+    const notified = await sendPendingReminders(bot.telegram);
+    res.status(200).send(`ok: ${notified} usuarios avisados`);
+  } catch (err) {
+    console.error("Error enviando recordatorios de pendientes:", err);
+    res.status(500).send("error");
+  }
+});
 
 async function main() {
   if (env.publicUrl) {

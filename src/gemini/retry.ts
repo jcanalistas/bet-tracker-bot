@@ -25,3 +25,20 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions):
   }
   throw lastErr;
 }
+
+/** Corta la espera de verdad si la API tarda más de `ms` — el timeout de httpOptions del SDK de Gemini no siempre aborta la petición. */
+export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${message} (${ms / 1000}s)`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
