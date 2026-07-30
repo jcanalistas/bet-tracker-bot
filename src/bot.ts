@@ -260,7 +260,7 @@ interface BetDescription {
 
 function describeBet(bet: BetDescription, stake: number): string {
   const lines = [
-    bet.sport,
+    `${sportEmoji(bet.sport)}${bet.sport}`,
     `🎯 ${bet.match}`,
     bet.betType === "combinada" ? "🔀 Combinada" : "🔹 Simple",
     bet.oddsLabel ? `💰 Cuota: ${bet.oddsLabel}` : null,
