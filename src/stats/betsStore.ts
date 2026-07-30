@@ -169,13 +169,52 @@ export async function getStatsSummary(userId: string, options: StatsOptions = {}
   return summarize(bets);
 }
 
+export interface OddsRangeStats {
+  range: string;
+  total: number;
+  won: number;
+  lost: number;
+  hitRate: number;
+  netProfit: number;
+}
+
 export interface DetailedStats {
   bySport: { sport: string; summary: StatsSummary }[];
   simple: StatsSummary;
   combinada: StatsSummary;
+  /** Desglose por rango de cuota (solo resueltas), para ver en qué franja se acierta más — usado por el Análisis IA. */
+  byOddsRange: OddsRangeStats[];
 }
 
-/** Desglose por deporte y por tipo (simple/combinada) en un único viaje a Firestore, para "⭐ Análisis detallado". */
+const ODDS_RANGES: { label: string; min: number; max: number }[] = [
+  { label: "< 1,50", min: 0, max: 1.5 },
+  { label: "1,50 - 2,00", min: 1.5, max: 2 },
+  { label: "2,00 - 3,00", min: 2, max: 3 },
+  { label: "> 3,00", min: 3, max: Infinity },
+];
+
+/** La cuota real (si ganó) o la leída del ticket al registrar, para clasificar la apuesta por rango. Null si no hay ninguna. */
+function oddsOf(bet: Bet): number | null {
+  return bet.realOdds ?? bet.estimatedOdds ?? null;
+}
+
+function summarizeOddsRanges(bets: Bet[]): OddsRangeStats[] {
+  const resolved = bets.filter((b) => b.status === "ganada" || b.status === "perdida" || b.status === "cashout");
+
+  return ODDS_RANGES.map(({ label, min, max }) => {
+    const inRange = resolved.filter((b) => {
+      const odds = oddsOf(b);
+      return odds !== null && odds >= min && odds < max;
+    });
+    const won = inRange.filter((b) => b.status === "ganada" || (b.status === "cashout" && (b.profit ?? 0) > 0)).length;
+    const lost = inRange.length - won;
+    const netProfit = cleanFloat(inRange.reduce((sum, b) => sum + (b.profit ?? 0), 0));
+    const hitRate = inRange.length > 0 ? cleanFloat((won / inRange.length) * 100) : 0;
+    return { range: label, total: inRange.length, won, lost, hitRate, netProfit };
+  }).filter((r) => r.total > 0);
+}
+
+/** Desglose por deporte, por tipo (simple/combinada) y por rango de cuota en un único viaje a Firestore, para "⭐ Stats completas" y "⭐ Análisis IA". */
 export async function getDetailedStats(userId: string, period: StatsPeriod): Promise<DetailedStats> {
   const bets = await getUserBets(userId, { period });
 
@@ -186,6 +225,7 @@ export async function getDetailedStats(userId: string, period: StatsPeriod): Pro
     bySport,
     simple: summarize(bets.filter((b) => b.betType === "simple")),
     combinada: summarize(bets.filter((b) => b.betType === "combinada")),
+    byOddsRange: summarizeOddsRanges(bets),
   };
 }
 
