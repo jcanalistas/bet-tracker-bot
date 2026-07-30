@@ -238,9 +238,11 @@ function pendingBetKeyboard(betId: string) {
   ]);
 }
 
-/** Botón de acceso directo a /stats, debajo del mensaje-resumen al resolver una apuesta (Ganada/Perdida/Nula/Cashout). */
-function statsShortcutKeyboard() {
-  return Markup.inlineKeyboard([[Markup.button.callback(STATS_BUTTON_TEXT, "goto:stats")]]);
+/** Botones debajo del mensaje-resumen al resolver una apuesta (Ganada/Perdida/Nula/Cashout): acceso directo a /stats y borrarla si se resolvió mal. */
+function resolvedBetKeyboard(betId: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(STATS_BUTTON_TEXT, "goto:stats"), Markup.button.callback("🗑️ Borrar", `betdelete:${betId}`)],
+  ]);
 }
 
 bot.action("goto:stats", async (ctx) => {
@@ -380,7 +382,7 @@ bot.action(/^betlost:(.+)$/, async (ctx) => {
     const profit = await markBetLost(betId);
     await safeAnswerCbQuery(ctx, "Marcada como perdida ❌");
     await safeClearKeyboard(ctx);
-    await ctx.reply(`❌ Apuesta marcada como perdida (${formatMoney(profit)}€).`, statsShortcutKeyboard());
+    await ctx.reply(`❌ Apuesta marcada como perdida (${formatMoney(profit)}€).`, resolvedBetKeyboard(betId));
   } catch (err) {
     console.error("No se pudo marcar la apuesta como perdida:", err);
     await safeAnswerCbQuery(ctx, "⚠️ No se pudo actualizar. Revisa los logs.", { show_alert: true });
@@ -419,7 +421,7 @@ bot.action(/^betwon:(.+)$/, async (ctx) => {
     const profit = await markBetWon(betId, bet.estimatedOdds);
     await ctx.reply(
       `✅ Apuesta ganada @${formatMoney(bet.estimatedOdds)}. Beneficio: +${formatMoney(profit)}€.`,
-      statsShortcutKeyboard()
+      resolvedBetKeyboard(betId)
     );
   } catch (err) {
     console.error("No se pudo marcar la apuesta como ganada:", err);
@@ -433,7 +435,10 @@ bot.action(/^betvoid:(.+)$/, async (ctx) => {
     await markBetVoid(betId);
     await safeAnswerCbQuery(ctx, "Marcada como nula 🔁");
     await safeClearKeyboard(ctx);
-    await ctx.reply("🔁 Apuesta marcada como nula: se te devuelve el importe, beneficio 0€.", statsShortcutKeyboard());
+    await ctx.reply(
+      "🔁 Apuesta marcada como nula: se te devuelve el importe, beneficio 0€.",
+      resolvedBetKeyboard(betId)
+    );
   } catch (err) {
     console.error("No se pudo marcar la apuesta como nula:", err);
     await safeAnswerCbQuery(ctx, "⚠️ No se pudo actualizar. Revisa los logs.", { show_alert: true });
@@ -715,7 +720,7 @@ bot.on("text", async (ctx) => {
       const profit = await markBetWon(betIdAwaitingOdds, oddsValue);
       await ctx.reply(
         `✅ Apuesta ganada @${ctx.message.text.trim()}. Beneficio: +${formatMoney(profit)}€.`,
-        statsShortcutKeyboard()
+        resolvedBetKeyboard(betIdAwaitingOdds)
       );
     } catch (err) {
       console.error("No se pudo marcar la apuesta como ganada:", err);
@@ -736,7 +741,7 @@ bot.on("text", async (ctx) => {
       await markBetCashout(betIdAwaitingCashout, profit);
       await ctx.reply(
         `💵 Cashout registrado. Beneficio: ${profit >= 0 ? "+" : ""}${formatMoney(profit)}€.`,
-        statsShortcutKeyboard()
+        resolvedBetKeyboard(betIdAwaitingCashout)
       );
     } catch (err) {
       console.error("No se pudo registrar el cashout:", err);

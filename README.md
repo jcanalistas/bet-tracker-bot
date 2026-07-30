@@ -240,6 +240,11 @@ En Telegram, háblale al bot:
     (puede ser negativo, ej. `-3`) y lo registra tal cual.
   - **"🗑️ Anular"** — borra la apuesta por completo, para cuando se
     registró por error; no deja ningún rastro en las estadísticas.
+
+  El mensaje de confirmación que llega al resolverla (Ganada/Perdida/Nula/
+  Cashout) trae dos botones: **"📊 Stats"** (acceso directo al selector de
+  periodo) y **"🗑️ Borrar"** (por si se resolvió mal — borra la apuesta ya
+  resuelta por completo, igual que "Anular").
 - `/stats` (o "📊 Stats") — pregunta primero el periodo con botones (**Mes
   actual**, **Año actual**, **Histórico**, según la fecha en que se
   registró cada apuesta) y luego muestra: apuestas registradas, pendientes,
