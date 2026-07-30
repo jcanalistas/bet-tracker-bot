@@ -69,6 +69,16 @@ async function safeClearKeyboard(ctx: Context) {
   }
 }
 
+/** Borra un mensaje transitorio ("Leyendo ticket...", "⏳ Cargando...") una vez ya se mandó el resultado final, para no dejar ruido en el chat. */
+async function safeDeleteMessage(ctx: Context, messageId: number | undefined) {
+  if (messageId === undefined) return;
+  try {
+    await ctx.deleteMessage(messageId);
+  } catch (err) {
+    console.error("No se pudo borrar el mensaje temporal:", err);
+  }
+}
+
 const START_BUTTON_TEXT = "📸 Registrar";
 const PENDIENTES_BUTTON_TEXT = "📝 Pendientes";
 const STATS_BUTTON_TEXT = "📊 Stats";
@@ -314,7 +324,7 @@ async function registerBet(ctx: Context, userId: string, ticket: TicketInfo, sta
 
 bot.on("photo", async (ctx) => {
   const userId = String(ctx.from!.id);
-  await ctx.reply("📸 Leyendo el ticket...");
+  const loadingMsg = await ctx.reply("📸 Leyendo el ticket...");
 
   let ticket: TicketInfo;
   try {
@@ -322,9 +332,12 @@ bot.on("photo", async (ctx) => {
     ticket = await analyzeTicket(buffer, env.geminiApiKey);
   } catch (err) {
     console.error("No se pudo leer el ticket:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No pude leer el ticket. Prueba con una foto más clara, bien encuadrada y sin recortar los datos.");
     return;
   }
+
+  await safeDeleteMessage(ctx, loadingMsg.message_id);
 
   const stake = ticket.stake ? parseDecimalInput(ticket.stake) : null;
   if (stake === null) {
@@ -480,14 +493,18 @@ function statsFilterKeyboard(period: StatsPeriod) {
 
 async function showStats(ctx: Context, period: StatsPeriod, filter?: string) {
   const userId = String(ctx.from!.id);
+  const loadingMsg = await ctx.reply("⏳ Cargando stats...");
+
   let summary;
   try {
     summary = await getStatsSummary(userId, { filter, period });
   } catch (err) {
     console.error("No se pudieron obtener las estadísticas:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No se pudieron obtener las estadísticas. Revisa los logs.");
     return;
   }
+  await safeDeleteMessage(ctx, loadingMsg.message_id);
 
   const resolved = summary.won + summary.lost;
   const profitIcon = summary.netProfit > 0 ? "📈" : summary.netProfit < 0 ? "📉" : "➖";
@@ -522,7 +539,7 @@ bot.hears(STATS_BUTTON_TEXT, askStatsPeriod);
 bot.action(/^stats:(mes|anio|historico)$/, async (ctx) => {
   const period = ctx.match[1] as StatsPeriod;
   await safeAnswerCbQuery(ctx);
-  await safeClearKeyboard(ctx);
+  await safeDeleteMessage(ctx, ctx.callbackQuery.message?.message_id);
   await showStats(ctx, period);
 });
 
@@ -548,14 +565,18 @@ bot.action(/^statsf:(mes|anio|historico):detallado$/, async (ctx) => {
     return;
   }
 
+  const loadingMsg = await ctx.reply("⏳ Cargando stats completas...");
+
   let detailed;
   try {
     detailed = await getDetailedStats(userId, period);
   } catch (err) {
     console.error("No se pudieron obtener las stats completas:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No se pudieron obtener las stats completas. Revisa los logs.");
     return;
   }
+  await safeDeleteMessage(ctx, loadingMsg.message_id);
 
   const lines = [`🔎 *Stats completas* — ${PERIOD_LABELS[period]}`, "", "*Tipo*"];
   lines.push(formatSummaryLine("🔹 Simple", detailed.simple));
@@ -595,12 +616,14 @@ bot.action(/^statsf:(mes|anio|historico):ia$/, async (ctx) => {
     return;
   }
 
-  await ctx.reply("🤖 Generando análisis...");
+  const loadingMsg = await ctx.reply("🤖 Generando análisis...");
   try {
     const analysis = await generateBettingAnalysis(detailed, env.geminiApiKey);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply(`🤖 Análisis IA — ${PERIOD_LABELS[period]}\n\n${analysis}`);
   } catch (err) {
     console.error("No se pudo generar el análisis IA:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No se pudo generar el análisis. Inténtalo de nuevo en un momento.");
   }
 });
@@ -614,21 +637,26 @@ bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {
     return;
   }
 
+  const loadingMsg = await ctx.reply("⏳ Generando gráfica...");
+
   let points;
   try {
     points = await getProfitSeries(userId, { period });
   } catch (err) {
     console.error("No se pudo generar la gráfica:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No se pudo generar la gráfica. Revisa los logs.");
     return;
   }
 
   if (points.length < 2) {
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("📈 Todavía no hay suficientes apuestas resueltas en este periodo para dibujar una gráfica.");
     return;
   }
 
   const chart = await renderProfitChart(points);
+  await safeDeleteMessage(ctx, loadingMsg.message_id);
   await ctx.replyWithPhoto({ source: chart }, { caption: `📈 Evolución del beneficio — ${PERIOD_LABELS[period]}` });
 });
 
@@ -641,22 +669,27 @@ bot.action(/^statsf:(mes|anio|historico):csv$/, async (ctx) => {
     return;
   }
 
+  const loadingMsg = await ctx.reply("⏳ Preparando el CSV...");
+
   let bets;
   try {
     bets = await getBetsForExport(userId, { period });
   } catch (err) {
     console.error("No se pudo exportar el historial:", err);
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("⚠️ No se pudo exportar el historial. Revisa los logs.");
     return;
   }
 
   if (bets.length === 0) {
+    await safeDeleteMessage(ctx, loadingMsg.message_id);
     await ctx.reply("No hay apuestas en este periodo para exportar.");
     return;
   }
 
   // BOM al principio para que Excel detecte UTF-8 y no rompa los acentos.
   const csv = "\uFEFF" + betsToCsv(bets);
+  await safeDeleteMessage(ctx, loadingMsg.message_id);
   await ctx.replyWithDocument({ source: Buffer.from(csv, "utf-8"), filename: `historial-apuestas-${period}.csv` });
 });
 
