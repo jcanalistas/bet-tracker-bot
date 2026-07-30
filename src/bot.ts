@@ -291,7 +291,7 @@ async function maybeSendBetterOdds(ctx: Context, ticket: TicketInfo, currentOdds
 
   if (offers.length === 0) return;
 
-  const lines = ["💰 *Mejor cuota disponible*", "", "Puedes ganar más con la misma apuesta en estas casas:", ""];
+  const lines = ["💰 *Mejor cuota disponible*", "", "Puedes ganar más aquí 👇", ""];
   for (const offer of offers.slice(0, 3)) {
     const name = escapeMarkdownV2(offer.house.name);
     const url = escapeMarkdownV2Url(offer.house.url);
