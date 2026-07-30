@@ -9,7 +9,7 @@ import {
   getBetsForExport,
   getDetailedStats,
   getPendingBets,
-  getProfitSeries,
+  getProfitTimeline,
   markBetCashout,
   markBetLost,
   markBetVoid,
@@ -646,7 +646,7 @@ bot.action(/^statsf:(mes|anio|historico):grafica$/, async (ctx) => {
 
   let points;
   try {
-    points = await getProfitSeries(userId, { period });
+    points = await getProfitTimeline(userId, period);
   } catch (err) {
     console.error("No se pudo generar la gráfica:", err);
     await safeDeleteMessage(ctx, loadingMsg.message_id);

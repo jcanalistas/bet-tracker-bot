@@ -178,12 +178,31 @@ export interface OddsRangeStats {
   netProfit: number;
 }
 
+export interface StakeSizeStats {
+  label: string;
+  total: number;
+  won: number;
+  lost: number;
+  hitRate: number;
+  netProfit: number;
+}
+
+export interface StreakInfo {
+  /** null si no hay ninguna apuesta resuelta todavía. */
+  type: "ganada" | "perdida" | null;
+  count: number;
+}
+
 export interface DetailedStats {
   bySport: { sport: string; summary: StatsSummary }[];
   simple: StatsSummary;
   combinada: StatsSummary;
   /** Desglose por rango de cuota (solo resueltas), para ver en qué franja se acierta más — usado por el Análisis IA. */
   byOddsRange: OddsRangeStats[];
+  /** Apuestas por debajo/encima del importe medio del usuario, para ver si el tamaño de la apuesta afecta al acierto. */
+  byStakeSize: StakeSizeStats[];
+  /** Racha actual de resultados seguidos (ganadas o perdidas), la más reciente primero. */
+  streak: StreakInfo;
 }
 
 const ODDS_RANGES: { label: string; min: number; max: number }[] = [
@@ -198,15 +217,24 @@ function oddsOf(bet: Bet): number | null {
   return bet.realOdds ?? bet.estimatedOdds ?? null;
 }
 
+/** Resueltas de verdad, con un resultado claro (ganada/perdida/cashout) — nula y pendiente quedan fuera de rachas, rangos de cuota, etc. */
+function isResolved(bet: Bet): boolean {
+  return bet.status === "ganada" || bet.status === "perdida" || bet.status === "cashout";
+}
+
+function isWin(bet: Bet): boolean {
+  return bet.status === "ganada" || (bet.status === "cashout" && (bet.profit ?? 0) > 0);
+}
+
 function summarizeOddsRanges(bets: Bet[]): OddsRangeStats[] {
-  const resolved = bets.filter((b) => b.status === "ganada" || b.status === "perdida" || b.status === "cashout");
+  const resolved = bets.filter(isResolved);
 
   return ODDS_RANGES.map(({ label, min, max }) => {
     const inRange = resolved.filter((b) => {
       const odds = oddsOf(b);
       return odds !== null && odds >= min && odds < max;
     });
-    const won = inRange.filter((b) => b.status === "ganada" || (b.status === "cashout" && (b.profit ?? 0) > 0)).length;
+    const won = inRange.filter(isWin).length;
     const lost = inRange.length - won;
     const netProfit = cleanFloat(inRange.reduce((sum, b) => sum + (b.profit ?? 0), 0));
     const hitRate = inRange.length > 0 ? cleanFloat((won / inRange.length) * 100) : 0;
@@ -214,7 +242,45 @@ function summarizeOddsRanges(bets: Bet[]): OddsRangeStats[] {
   }).filter((r) => r.total > 0);
 }
 
-/** Desglose por deporte, por tipo (simple/combinada) y por rango de cuota en un único viaje a Firestore, para "⭐ Stats completas" y "⭐ Análisis IA". */
+function summarizeByStakeSize(bets: Bet[]): StakeSizeStats[] {
+  const resolved = bets.filter(isResolved);
+  if (resolved.length === 0) return [];
+
+  const avgStake = cleanFloat(resolved.reduce((sum, b) => sum + b.stake, 0) / resolved.length);
+  const buckets: { label: string; filter: (b: Bet) => boolean }[] = [
+    { label: `Importe ≤ media (${formatMoney(avgStake)}€)`, filter: (b) => b.stake <= avgStake },
+    { label: `Importe > media (${formatMoney(avgStake)}€)`, filter: (b) => b.stake > avgStake },
+  ];
+
+  return buckets
+    .map(({ label, filter }) => {
+      const inBucket = resolved.filter(filter);
+      const won = inBucket.filter(isWin).length;
+      const lost = inBucket.length - won;
+      const netProfit = cleanFloat(inBucket.reduce((sum, b) => sum + (b.profit ?? 0), 0));
+      const hitRate = inBucket.length > 0 ? cleanFloat((won / inBucket.length) * 100) : 0;
+      return { label, total: inBucket.length, won, lost, hitRate, netProfit };
+    })
+    .filter((b) => b.total > 0);
+}
+
+function computeStreak(bets: Bet[]): StreakInfo {
+  const resolved = bets
+    .filter((b): b is Bet & { resolvedAt: number } => isResolved(b) && b.resolvedAt !== undefined)
+    .sort((a, b) => b.resolvedAt - a.resolvedAt); // más reciente primero
+
+  if (resolved.length === 0) return { type: null, count: 0 };
+
+  const latestIsWin = isWin(resolved[0]);
+  let count = 0;
+  for (const bet of resolved) {
+    if (isWin(bet) !== latestIsWin) break;
+    count++;
+  }
+  return { type: latestIsWin ? "ganada" : "perdida", count };
+}
+
+/** Desglose por deporte, tipo, rango de cuota, tamaño de apuesta y racha actual en un único viaje a Firestore, para "⭐ Stats completas" y "⭐ Análisis IA". */
 export async function getDetailedStats(userId: string, period: StatsPeriod): Promise<DetailedStats> {
   const bets = await getUserBets(userId, { period });
 
@@ -226,6 +292,8 @@ export async function getDetailedStats(userId: string, period: StatsPeriod): Pro
     simple: summarize(bets.filter((b) => b.betType === "simple")),
     combinada: summarize(bets.filter((b) => b.betType === "combinada")),
     byOddsRange: summarizeOddsRanges(bets),
+    byStakeSize: summarizeByStakeSize(bets),
+    streak: computeStreak(bets),
   };
 }
 
@@ -235,24 +303,90 @@ export async function getBetsForExport(userId: string, options: StatsOptions = {
   return [...bets].sort((a, b) => a.createdAt - b.createdAt);
 }
 
-export interface ProfitPoint {
-  /** Timestamp de resolución (ganada/perdida) de la apuesta. */
-  at: number;
+export interface ProfitTimelinePoint {
+  /** Etiqueta del eje X: días del mes, semana del año, o mes, según el periodo. */
+  label: string;
   cumulativeProfit: number;
 }
 
-/** Beneficio acumulado apuesta a apuesta, en orden cronológico de resolución — para la gráfica premium. Solo cuenta apuestas ya resueltas. */
-export async function getProfitSeries(userId: string, options: StatsOptions = {}): Promise<ProfitPoint[]> {
-  const bets = await getUserBets(userId, options);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MONTH_LABELS_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+function startOfMonth(ts: number): Date {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+/** Franjas [inicio, fin) del eje X según el periodo: cada 2 días en "mes", cada semana en "año", cada mes en "histórico". Recorta el final a "ahora" — no tiene sentido dibujar franjas futuras vacías. */
+function buildBucketBounds(period: StatsPeriod, earliestResolvedAt: number): number[] {
+  const now = Date.now();
+
+  if (period === "mes" || period === "anio") {
+    const range = periodRange(period)!;
+    const stepMs = period === "mes" ? 2 * DAY_MS : 7 * DAY_MS;
+    const limit = Math.min(range.to, now);
+    const bounds: number[] = [];
+    let t = range.from;
+    while (t < limit) {
+      bounds.push(t);
+      t += stepMs;
+    }
+    bounds.push(t); // cierra el último tramo
+    return bounds;
+  }
+
+  // histórico: un tramo por mes natural, desde el mes de la primera apuesta resuelta hasta el actual.
+  const bounds: number[] = [];
+  let cursor = startOfMonth(earliestResolvedAt);
+  const last = startOfMonth(now);
+  while (cursor.getTime() <= last.getTime()) {
+    bounds.push(cursor.getTime());
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  bounds.push(cursor.getTime());
+  return bounds;
+}
+
+function bucketLabel(period: StatsPeriod, bucketStart: number): string {
+  const d = new Date(bucketStart);
+  if (period === "mes") return `${d.getDate()}`;
+  if (period === "anio") return `${d.getDate()}/${d.getMonth() + 1}`;
+  return `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`;
+}
+
+/**
+ * Beneficio acumulado agrupado por franjas de tiempo (no una por apuesta):
+ * cada 2 días si el periodo es "mes", cada semana si es "año", cada mes si
+ * es "histórico" — para que la gráfica premium sea legible aunque haya
+ * muchas apuestas. Solo cuenta apuestas ya resueltas (ganada/perdida/
+ * cashout; nula no suma ni resta pero tampoco hace falta excluirla del
+ * cálculo porque su beneficio ya es 0).
+ */
+export async function getProfitTimeline(userId: string, period: StatsPeriod): Promise<ProfitTimelinePoint[]> {
+  const bets = await getUserBets(userId, { period });
   const resolved = bets
-    .filter((b): b is Bet & { resolvedAt: number } => b.status !== "pendiente" && b.resolvedAt !== undefined)
+    .filter((b): b is Bet & { resolvedAt: number } => isResolved(b) && b.resolvedAt !== undefined)
     .sort((a, b) => a.resolvedAt - b.resolvedAt);
 
+  if (resolved.length === 0) return [];
+
+  const bounds = buildBucketBounds(period, resolved[0].resolvedAt);
+  if (bounds.length < 2) return [];
+
   let cumulative = 0;
-  return resolved.map((b) => {
-    cumulative = cleanFloat(cumulative + (b.profit ?? 0));
-    return { at: b.resolvedAt, cumulativeProfit: cumulative };
-  });
+  let betIndex = 0;
+  const points: ProfitTimelinePoint[] = [];
+
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const bucketEnd = bounds[i + 1];
+    while (betIndex < resolved.length && resolved[betIndex].resolvedAt < bucketEnd) {
+      cumulative = cleanFloat(cumulative + (resolved[betIndex].profit ?? 0));
+      betIndex++;
+    }
+    points.push({ label: bucketLabel(period, bounds[i]), cumulativeProfit: cumulative });
+  }
+
+  return points;
 }
 
 function toBet(doc: DocumentSnapshot): Bet {

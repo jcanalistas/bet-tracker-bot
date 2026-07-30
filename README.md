@@ -256,12 +256,17 @@ En Telegram, háblale al bot:
     eligiendo filtro por filtro (`/stats simple`, `/stats combinada` y
     `/stats <deporte>` por texto siguen funcionando igual, también
     premium, si prefieres uno suelto).
-  - ⭐ Análisis IA — le pasa ese mismo desglose a Gemini y pide un análisis
-    escueto (máximo 5 líneas): dónde ganas, dónde pierdes y qué hacer para
-    mejorar.
+  - ⭐ Análisis IA — le pasa a Gemini el desglose por deporte/tipo, por
+    rango de cuota, por tamaño de apuesta (importe por debajo/encima de tu
+    media) y tu racha actual, y pide un análisis escueto (máximo 8 líneas):
+    dónde ganas, dónde pierdes, en qué rango de cuota aciertas más, si el
+    importe apostado influye, si la racha actual merece un aviso, y qué
+    hacer para mejorar.
   - ⭐ Gráfica — genera una imagen con la evolución del beneficio
-    acumulado apuesta a apuesta, dentro del periodo elegido (necesita al
-    menos 2 apuestas resueltas en ese periodo).
+    acumulado, agrupado por franjas de tiempo en vez de apuesta a apuesta
+    (para que no se amontone si hay muchas): cada 2 días si el periodo es
+    Mes actual, cada semana si es Año actual, cada mes si es Histórico.
+    Necesita al menos una apuesta resuelta en ese periodo.
   - ⭐ Exportar CSV — manda un archivo `.csv` con el historial completo del
     periodo elegido (fechas, partido, tipo, cuotas, importe, beneficio),
     listo para abrir en Excel/Sheets.
